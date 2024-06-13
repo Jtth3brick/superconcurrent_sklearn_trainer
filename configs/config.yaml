@@ -1,0 +1,239 @@
+pipe_config_path: 'configs/pipe_configs.yaml'
+clean_metadata_path: 'data/metadata.csv'
+clean_data_path: 'data/data.csv'
+
+seed: 2
+n_splits: 5
+config_hash_col: 'Config Hash'
+index_col: 'Run' # Should be common index (equal ordering as well) between data.csv and metadata.csv
+y_col_name: 'Condition' # Should be in metadata.csv
+
+all_train_data:
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+
+train_U1: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['USA_hmbp', "USA_qiita", 'USA_umass']
+
+validate_U1: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['USA_prism']
+
+train_U2: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['USA_prism', "USA_qiita", 'USA_umass']
+
+validate_U2: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['USA_hmbp']
+
+train_A1: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['USA_hmbp', 'China_jia', 'Germany_elinav']
+
+validate_A1: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['Ireland_hill']
+
+train_A2: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['USA_hmbp', 'Ireland_hill', 'Germany_elinav']
+
+validate_A2: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: [China_jia]
+
+train_B1: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['USA_hmbp', 'China_jia', 'Israel_elinav']
+
+validate_B1: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['Ireland_hill']
+
+train_B2: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['Ireland_hill', 'USA_hmbp', 'Israel_elinav']
+
+validate_B2: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: [China_jia]
+
+train_C1: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['USA_hmbp', 'Germany_elinav', 'Ireland_hill']
+
+validate_C1: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['Israel_elinav']
+
+train_C2: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['Ireland_hill', 'USA_hmbp', 'Israel_elinav']
+
+validate_C2: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['Germany_elinav']
+
+train_D1: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['USA_hmbp', 'Germany_elinav', 'China_jia']
+
+validate_D1: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['Israel_elinav']
+
+INT_train_D2: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['USA_hmbp', 'Germany_elinav', 'Israel_elinav']
+
+validate_D2: #
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['Germany_elinav']

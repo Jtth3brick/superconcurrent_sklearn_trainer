@@ -1,0 +1,26 @@
+# General
+*.pkl
+*.lock
+.DS_Store
+**/.DS_Store
+**/__MACOSX
+
+# Python specific
+**/__pycache__/
+**/.ipynb_checkpoints/
+
+# VSCode
+.vscode/
+
+# Data directories
+data/assembled_data/
+data/working/
+data/data.csv
+
+# Scripts and logs
+scripts/__pycache__/
+scripts/old_logs/
+logs/
+
+# Preserve gitkeep files to keep empty dirs
+!.gitkeep
