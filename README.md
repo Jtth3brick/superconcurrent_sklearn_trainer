@@ -1,8 +1,5 @@
-## Info
-    - Parallel, distributed
-    - Needs shared file system
-    - Running manager runs cleanup, but workers may be started and reran.
-    - Inspired by Spark and MapReduce ideas, but very readable and persistant execution.
+# Superparallel Sklearn Trainer
+The Superparallel Sklearn Trainer is a parallel and distributed training framework that requires a shared file system for operation. It features a running manager that handles cleanup operations, while allowing for the flexible startup and rerun of worker processes as needed. Drawing inspiration from the MapReduce approach, this trainer emphasizes readability, explicitness, and persistent execution, making massive training tasks more manageable and transparent.
 
 ## For different datasets:
     - Replace data and metadata files in `data` directory.
@@ -27,16 +24,15 @@ Currently storage intensive
     - If you're not using Berkeley's Savio, `req.txt` is not guaranteed to work, but that and/or environment.yaml should suffice.
     - In short, we're going to be making a python 3.11 conda environment, installing mamba as our package manager, and then installing all of the packages needed in `scripts/globals.py`, mainly being `scikit-learn`, `py-xgboost`, `filelock`, and `pyyaml` with mamba and `persist-queue` with pip
 
-
 ### Preparing Training (train.py Manager)
 - Edit the `train_manager.sh` script to match your `split_names` as defined in `configs/config.yaml`. These are your data splits for training.
 - Execute the script using `sbatch train_manager.sh` or an equivalent bash command to set up the model arguments queue and pre-filter the training data for workers.
-    - **Hint:** Workers can be initiated as soon as there are enough `ModelConfig` objects in the queue. You will receive a log notification when the manager starts adding these arguments.
-    - **Hint:** You can monitor the completion of all training steps in `status.log` with `tail -f ../logs/status.log`.
-    - Once "Manager Complete." is logged, proceed to the next step (if you haven't already).
+    - **Hint:** Workers can be initiated as soon as there are enough `ModelConfig` objects in the queue. You will receive a log notification when the manager starts adding these arguments. It's possible too many workers could pull args faster than the manager can put them in (estimated on the scale of 700 workers.) So waiting for manager to finish may be your safest bet. 
+- **Hint:** You can monitor the completion of all training steps in `status.log` with `tail -f ../logs/status.log`.
+- Once "Manager Complete." is logged, proceed to the next step (if you haven't already).
 
 ### Running Workers
-- Run `train.py` to start a worker:
+- Run `train.py` with `work` argto start a worker:
     - A single invocation of `train.py` launches one worker who will continue to train on available arguments until completion or termination. Current slurm script launches an array of invocations.
     - All tasks outside of argument retrieval are designed to be handled independently by each worker.
     - Workers can be dynamically started or stopped as needed. Note that stopping a worker results in the loss of its current hyperparameter configuration. Future versions could implement ACK functionality from persist-queue to ensure comprehensive search.
@@ -53,9 +49,3 @@ Currently storage intensive
   python train.py manage --pipeline_names lasso enet --split_names train_A1 train_B2 --cv False --validate False
   ```
   **Note:** Both commands would train on `train_A1`, but the first would also require `validate_A1` to be present in the config.
-
----
-
-    
-    
-        

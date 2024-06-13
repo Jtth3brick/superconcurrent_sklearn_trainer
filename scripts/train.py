@@ -11,7 +11,6 @@ MAX_TRAIN_TIME = 60*60
 # Argument handling constants (through persistant, file-based queue)
 MAX_ARG_RETRIEVAL_ATTEMPTS = 3
 MODEL_CONFIGS_PATH = WORKING_DATA_DIR / 'model_config_queue'
-untrained_model_config_queue = utils.NodeDistributedQueue(MODEL_CONFIGS_PATH)
 
 random.seed(SEED)
 
@@ -28,6 +27,12 @@ def get_split_args_path(split_name):
     Given a split name, this function returns a path to the split args.
     """
     return WORKING_DATA_DIR / f'{split_name}_split_args.pkl'
+
+def get_untrained_model_config_queue(timeout):
+    """
+    Initializes a queue access object.
+    """
+    return utils.NodeDistributedQueue(MODEL_CONFIGS_PATH, timeout=timeout)
 
 class Worker:
     """
@@ -53,6 +58,7 @@ class Worker:
         self.worker_id = worker_id
         self.logger = utils.get_logger(f'train worker #{worker_id}')
         self.split_config: SplitConfig | None = None
+        self.model_config_queue = get_untrained_model_config_queue(timeout=60) # 1 min timeout for workers
         self.save_queue = utils.NodeDistributedQueue(SCORES_SAVE_QUEUE_PATH)
 
     def work(self):
@@ -146,14 +152,14 @@ class Worker:
         while retries < MAX_ARG_RETRIEVAL_ATTEMPTS:
             try:
                 # Lock queue and retrieve an item (get itself also gets a lock, but we also want size and we don't want to wait for two locks)
-                untrained_model_config_queue.acquire_lock()
-                num_args = untrained_model_config_queue._q.size
+                self.untrained_model_config_queue.acquire_lock()
+                num_args = self.untrained_model_config_queue._q.size
                 if num_args == 0:
                     self.logger.info(f"No more arguments in queue. Exiting...")
                     sys.exit()
                 self.logger.info(f"Attempting to grab model argument. Current queue size: {num_args}")
-                model_config = untrained_model_config_queue.get()
-                untrained_model_config_queue.release_lock()
+                model_config = self.untrained_model_config_queue.get()
+                self.untrained_model_config_queue.release_lock()
                 if model_config:
                     return model_config
             
@@ -188,6 +194,7 @@ class Manager:
         self.logger = utils.get_logger(f'train manager')
         self.cv = cv
         self.validate = validate
+        self.model_config_queue = get_untrained_model_config_queue(timeout=60*60) # 1 hour timeout for workers
 
     def manage(self):
         """
@@ -207,7 +214,7 @@ class Manager:
             model_configs = self.generate_model_configs(split_name)
             self.logger.info(f"Queueing model args for split {split_name}. Workers may start booting up after some lag...")
             for model_arg in model_configs:
-                untrained_model_config_queue.put(model_arg)
+                self.model_config_queue.put(model_arg)
             self.logger.info(f"Model args for split {split_name} successfully added to queue.")
 
         self.logger.info(f"Manager Completed.")

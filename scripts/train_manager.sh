@@ -5,7 +5,6 @@
 #SBATCH --time=72:00:00
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=16G
-#SBATCH --begin=now+2hours
 
 PYTHON=$(which python)
 

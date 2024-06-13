@@ -2,7 +2,7 @@
 #SBATCH --job-name=train_workers
 #SBATCH --account=ac_wolflab
 #SBATCH --partition=savio4_htc
-#SBATCH --array=0-299
+#SBATCH --array=0-499
 #SBATCH --time=72:00:00
 
 PYTHON=$(which python)

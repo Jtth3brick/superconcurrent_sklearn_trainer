@@ -36,11 +36,11 @@ class NodeDistributedQueue:
     """
     The base queue class is already thread safe. This wrapper is intended to keep the queue safe in the case of seperate environments on the same file system.
     """
-    def __init__(self, path):
+    def __init__(self, path, timeout=60):
         """Initialize the queue with a path to store the data and a lock file for safe concurrent access."""
         self.path = str(path)
         self.lock_path = f"{self.path}/data.db.lock"
-        self.lock = FileLock(self.lock_path, timeout=60) # One minute timeout as managers may put large argument sets.
+        self.lock = FileLock(self.lock_path, timeout=timeout) # One minute default timeout as managers may put large argument sets.
         self.manual_active = False
 
     def update_queue(self, force=False):
