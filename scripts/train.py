@@ -152,14 +152,14 @@ class Worker:
         while retries < MAX_ARG_RETRIEVAL_ATTEMPTS:
             try:
                 # Lock queue and retrieve an item (get itself also gets a lock, but we also want size and we don't want to wait for two locks)
-                self.untrained_model_config_queue.acquire_lock()
-                num_args = self.untrained_model_config_queue._q.size
+                self.model_config_queue.acquire_lock()
+                num_args = self.model_config_queue._q.size
                 if num_args == 0:
                     self.logger.info(f"No more arguments in queue. Exiting...")
                     sys.exit()
                 self.logger.info(f"Attempting to grab model argument. Current queue size: {num_args}")
-                model_config = self.untrained_model_config_queue.get()
-                self.untrained_model_config_queue.release_lock()
+                model_config = self.model_config_queue.get()
+                self.model_config_queue.release_lock()
                 if model_config:
                     return model_config
             
