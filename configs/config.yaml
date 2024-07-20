@@ -216,7 +216,7 @@ validate_D1: #
   config:
     Cohort: ['Israel_elinav']
 
-INT_train_D2: #
+train_D2: #
   include_intervention: false
   include_remission: false
   include_antibiotics: false

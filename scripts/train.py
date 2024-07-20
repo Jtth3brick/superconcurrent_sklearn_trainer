@@ -32,7 +32,7 @@ def get_untrained_model_config_queue(timeout):
     """
     Initializes a queue access object.
     """
-    return utils.NodeDistributedQueue(MODEL_CONFIGS_PATH, timeout=timeout)
+    return utils.DistributedArgHandler(location=MODEL_CONFIGS_PATH, lock_timeout=timeout, scan_limit=1)
 
 class Worker:
     """
@@ -58,8 +58,8 @@ class Worker:
         self.worker_id = worker_id
         self.logger = utils.get_logger(f'train worker #{worker_id}')
         self.split_config: SplitConfig | None = None
-        self.model_config_queue = get_untrained_model_config_queue(timeout=60) # 1 min timeout for workers
-        self.save_queue = utils.NodeDistributedQueue(SCORES_SAVE_QUEUE_PATH)
+        self.model_config_queue = get_untrained_model_config_queue(timeout=10) # 1 min timeout for workers
+        self.save_queue = utils.DistributedArgHandler(SCORES_SAVE_QUEUE_PATH)
 
     def work(self):
         self.logger.info(f"Python active")
@@ -105,7 +105,7 @@ class Worker:
             model_config.validate_score = utils.get_score(y_true=y, y_pred_proba=y_pred_proba, trained_classes=pipe.classes_)
 
         # Save scored utils.ModelConfig
-        self.save_queue.put(model_config)
+        self.save_queue.put(model_config, obj_name=model_config.config_hash, group_name=model_config.split_name)
     
     def get_cv_scores(self, model_config: utils.ModelConfig) -> List[float]:
         X, y = self.split_config.train_data, self.split_config.train_metadata[Y_COL_NAME]
@@ -142,34 +142,14 @@ class Worker:
         """
         Helper function used by workers to get a new model argument.
 
-        Tries MAX_RETRIES times to retrieve a model configs lock, and pop an argument.
-        On failure, the worker should exit and die.
-
-        See manage method for output data types.
+        Uses the built-in retry mechanism of DistributedArgHandler.
+        On failure, the worker will exit.
         """
-        errors = []
-        retries = 0
-        while retries < MAX_ARG_RETRIEVAL_ATTEMPTS:
-            try:
-                # Lock queue and retrieve an item (get itself also gets a lock, but we also want size and we don't want to wait for two locks)
-                self.model_config_queue.acquire_lock()
-                num_args = self.model_config_queue._q.size
-                if num_args == 0:
-                    self.logger.info(f"No more arguments in queue. Exiting...")
-                    sys.exit()
-                self.logger.info(f"Attempting to grab model argument. Current queue size: {num_args}")
-                model_config = self.model_config_queue.get()
-                self.model_config_queue.release_lock()
-                if model_config:
-                    return model_config
-            
-            except Exception as e:
-                if retries < MAX_ARG_RETRIEVAL_ATTEMPTS:
-                    retries += 1
-                    time.sleep(random.uniform(1, 20))  # Wait to avoid hammering
-                else:
-                    self.logger.error(f"Failed to load training argument after {MAX_ARG_RETRIEVAL_ATTEMPTS} attempts.")
-                sys.exit()
+        model_config = self.model_config_queue.get()
+        if model_config is None:
+            self.logger.error(f"Failed to load training argument after {self.model_config_queue.retry_limit} attempts. Estimated number of args remaining: {self.model_config_queue.count_pkl_files()}")
+            sys.exit()
+        return model_config
 class Manager:
     """
     Manages the preparation and distribution of model configurations and data splits.
@@ -201,7 +181,8 @@ class Manager:
         Makes a SplitConfig for each pipeline name in pipeline_names and saves
         then starts adding model args to untrained_model_config_queue.
         """
-        for split_name in self.split_names:
+        added_args = 0
+        for i, split_name in enumerate(self.split_names):
             # Generate SplitConfig, get save path, and save
             split_config = self.generate_split_config(split_name)
             split_args_path = get_split_args_path(split_name)
@@ -210,16 +191,18 @@ class Manager:
             self.logger.info(f"Successfully saved {split_name} SplitConfig.")
 
             # Generate utils.ModelConfigs and add to queue. We do this second so workers can dequeue items and start working.
-            # Note: this loop releases the lock in between additions so arguments may be retrieved by workers.
             model_configs = self.generate_model_configs(split_name)
             self.logger.info(f"Queueing model args for split {split_name}. Workers may start booting up after some lag...")
             for model_arg in model_configs:
-                self.model_config_queue.put(model_arg)
+                self.model_config_queue.put(model_arg, obj_name=model_arg.config_hash, group_name=model_arg.split_name)
+                added_args += 1
+                if added_args % 5000 == 0:
+                    self.logger.info(f"Adding {added_args} total arguments. On split {i+1} of {len(self.split_names)+1} total splits. Current estimated size: {self.model_config_queue.count_pkl_files()}")
             self.logger.info(f"Model args for split {split_name} successfully added to queue.")
 
         self.logger.info(f"Manager Completed.")
 
-    def generate_model_configs(self, split_name):
+    def generate_model_configs(self, split_name: str) -> List[utils.ModelConfig]:
         """
         Generates a list of utils.ModelConfig instances for various pipeline configurations.
         

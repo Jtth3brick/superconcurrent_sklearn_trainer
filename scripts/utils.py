@@ -32,52 +32,198 @@ def get_logger(context=None):
 
     return _loggers[context]
 
-class NodeDistributedQueue:
+class DistributedArgHandler:
     """
-    The base queue class is already thread safe. This wrapper is intended to keep the queue safe in the case of seperate environments on the same file system.
+    A distributed argument handler for managing ModelConfig objects across multiple processes.
+    
+    This class provides a file-based queue-like interface for storing and retrieving
+    ModelConfig objects in a distributed environment. It's designed to work with
+    the training pipeline, allowing multiple workers to safely access and process
+    model configurations.
+
+    The handler uses file locking to ensure thread-safe and multi-environment safe
+    access on a shared file system, making it suitable for use with job schedulers
+    like SLURM.
+
+    It also includes bulk operations that are not concurrent-safe but provide
+    faster processing for single-threaded scenarios.
     """
-    def __init__(self, path, timeout=60):
-        """Initialize the queue with a path to store the data and a lock file for safe concurrent access."""
-        self.path = str(path)
-        self.lock_path = f"{self.path}/data.db.lock"
-        self.lock = FileLock(self.lock_path, timeout=timeout) # One minute default timeout as managers may put large argument sets.
-        self.manual_active = False
 
-    def update_queue(self, force=False):
+    def __init__(self, location: str, lock_timeout: int = 60, retry_limit: int = 5, scan_limit: int = 100):
         """
-        Reinitialize the queue object to ensure it is up-to-date with any changes made since the last access.
-        This method should be called whenever the lock is acquired.
-        """
-        # if manual active, then the queue is already up-to-date and does not need to be reinitialized
-        if force or not self.manual_active:
-            self._q = FIFOSQLiteQueue(self.path)
+        Initialize the DistributedArgHandler.
 
-    def get(self):
+        Args:
+            location (str): Path to the directory where ModelConfig objects will be stored.
+            lock_timeout (int): Maximum time (in seconds) to wait for a file lock.
+            retry_limit (int): Number of times to retry getting an object before giving up.
+            scan_limit (int): Maximum number of files to scan in the directory at once.
         """
-        Retrieve and remove the first item from the queue.
-        If the queue is empty, return None.
+        self.location = Path(location)
+        self.lock_timeout = lock_timeout
+        self.retry_limit = retry_limit
+        self.scan_limit = scan_limit
+        self.location.mkdir(parents=True, exist_ok=True)
+
+    def put(self, obj: Any, obj_name: str, group_name: str = ""):
         """
-        with self.lock:
-            self.update_queue()
-            if self._q.size == 0:
+        Store a ModelConfig object in the distributed storage.
+
+        This method pickles the object and saves it to a file. The filename includes
+        the group_name (if provided) to allow for implicit grouping of related configs.
+
+        Args:
+            obj (Any): The ModelConfig object to store.
+            obj_name (str): A unique name for this object.
+            group_name (str, optional): A group identifier, useful for related configs.
+        """
+        file_name = f"{group_name}_{obj_name}" if group_name else obj_name
+        file_path = self.location / f"{file_name}.pkl"
+        lock_path = str(file_path) + ".lock"
+        
+        with FileLock(lock_path, timeout=self.lock_timeout):
+            with open(file_path, 'wb') as f:
+                pickle.dump(obj, f)
+        
+        # Explicitly remove the lock file after it's released
+        if os.path.exists(lock_path):
+            os.remove(lock_path)
+
+
+    def get(self) -> Optional[Any]:
+        """
+        Retrieve and remove a ModelConfig object from the distributed storage.
+
+        This method scans the directory for available files, chooses one randomly,
+        and attempts to lock, read, and delete it. If it fails (e.g., due to 
+        another process accessing the same file), it will retry up to retry_limit times.
+
+        Returns:
+            Optional[Any]: A ModelConfig object if successful, None if no objects are 
+                           available or if all retrieval attempts fail.
+        """
+        for _ in range(self.retry_limit):
+            available_files = self._scan_dir()
+            if not available_files:
                 return None
-            else:
-                return self._q.get()
+            
+            chosen_file = random.choice(available_files)
+            file_path = self.location / chosen_file
+            lock_path = str(file_path) + ".lock"
+            
+            try:
+                with FileLock(lock_path, timeout=self.lock_timeout):
+                    if file_path.exists():
+                        with open(file_path, 'rb') as f:
+                            obj = pickle.load(f)
+                        file_path.unlink()  # Remove the file after successful retrieval
+                        return obj
+            except:
+                continue  # If we fail to acquire the lock or read the file, try another
+            finally:
+                # Explicitly remove the lock file after it's released
+                if os.path.exists(lock_path):
+                    os.remove(lock_path)
+        
+        return None  # If we've exhausted our retries, return None
 
-    def put(self, item):
-        with self.lock:
-            self.update_queue()
-            self._q.put(item)
+    def bulk_put(self, objs: List[Dict[str, Any]]):
+        """
+        Store multiple ModelConfig objects in the distributed storage.
 
-    # Manual locking and unlocking to allow multiple operations in a row.
-    def acquire_lock(self):
-        self.lock.acquire()
-        self.update_queue(force=True)
-        self.manual_active = True
+        NOT CONCURRENT SAFE
+        NO TIME COMPLEXITY GUARANTEES
 
-    def release_lock(self):
-        self.lock.release()
-        self.manual_active = False
+        This method quickly writes multiple objects without using locks,
+        assuming no concurrent access.
+
+        Args:
+            objs (List[Dict[str, Any]]): A list of dictionaries, each containing:
+                - 'obj': The ModelConfig object to store
+                - 'obj_name': A unique name for this object
+                - 'group_name': (optional) A group identifier
+        """
+        for item in objs:
+            obj = item['obj']
+            obj_name = item['obj_name']
+            group_name = item.get('group_name', '')
+            
+            file_name = f"{group_name}_{obj_name}" if group_name else obj_name
+            file_path = self.location / f"{file_name}.pkl"
+            
+            with open(file_path, 'wb') as f:
+                pickle.dump(obj, f)
+
+    def get_all(self, limit: int = None) -> List[Any]:
+        """
+        Retrieve (but do not remove) multiple ModelConfig objects from the distributed storage.
+
+        NOT CONCURRENT SAFE
+        NO UNIQUENESS GUARANTEES
+        NO TIME COMPLEXITY GUARANTEES
+
+        This method quickly reads multiple objects without using locks,
+        assuming no concurrent access. It does not modify the storage.
+
+        Args:
+            limit (int, optional): Maximum number of objects to retrieve.
+                                   If None, retrieves all available objects.
+
+        Returns:
+            List[Any]: A list of ModelConfig objects.
+        """
+        results = []
+        with os.scandir(self.location) as it:
+            for entry in it:
+                if entry.name.endswith('.pkl'):
+                    if limit is not None and len(results) >= limit:
+                        break
+                    file_path = self.location / entry.name
+                    try:
+                        with open(file_path, 'rb') as f:
+                            obj = pickle.load(f)
+                        results.append(obj)
+                    except:
+                        # If we fail to read a file, just skip it
+                        continue
+        return results
+
+    def _scan_dir(self) -> list:
+        """
+        Scan the directory for available ModelConfig files.
+
+        This method uses os.scandir for efficient directory scanning, limiting
+        the number of files it looks at to scan_limit. It checks for .pkl files
+        that don't have an associated .lock file.
+
+        Returns:
+            list: A list of available file names, up to scan_limit in length.
+        """
+        available_files = []
+        with os.scandir(self.location) as it:
+            for entry in it:
+                if len(available_files) >= self.scan_limit:
+                    break
+                if entry.name.endswith('.pkl') and not Path(str(entry.path) + ".lock").exists():
+                    available_files.append(entry.name)
+        return available_files
+    
+    def count_pkl_files(self) -> int:
+        """
+        Approximate the number of .pkl files in the storage directory.
+
+        This method is READ-ONLY and does not modify any files.
+        NO TIME COMPLEXITY GUARANTEES
+
+        Returns:
+            int: The number of .pkl files in the storage directory.
+        """
+        count = 0
+        with os.scandir(self.location) as it:
+            for entry in it:
+                if entry.name.endswith('.pkl'):
+                    count += 1
+        return count
 
 @dataclass
 class ModelConfig:
@@ -93,10 +239,12 @@ class ModelConfig:
         - Filled by manager
         _pipeline_hyperparams (Dict[str, Any]): Dictionary of hyperparameters for the pipeline. This variable must be copied before any fitting.
         - Filled by manager
-        cv_scores (List[float]): List of cross-validation AUC scores of the model. Added after fitting and before saving.
-        - Filled by worker
-        validate_score (float): optional AUC score of model applied to validate substitution (see readme)
         config_hash (str): The identifier of the model, specific to hyperparameters and split.
+        - Filled automatically after initialization
+        cv_scores (List[float]): List of cross-validation AUC scores of the model. Added after fitting and before saving.
+        - Filled by worker if cv=true
+        validate_score (float): optional AUC score of model applied to validate substitution (see readme)
+        - Filled by worker if validate=true
     """
     split_name: str
     pipeline_name: str

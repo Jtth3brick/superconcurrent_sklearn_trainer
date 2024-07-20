@@ -13,6 +13,7 @@ import pickle
 import shutil
 import argparse
 import zipfile
+from typing import List, Any, Optional
 from dataclasses import dataclass, field
 from typing import Any, List, Dict, Tuple
 from itertools import product, zip_longest
@@ -21,7 +22,6 @@ from datetime import datetime
 from importlib import import_module
 
 from filelock import FileLock
-from persistqueue import FIFOSQLiteQueue
 
 import numpy as np
 import pandas as pd
