@@ -32,7 +32,7 @@ def get_untrained_model_config_queue(timeout):
     """
     Initializes a queue access object.
     """
-    return utils.DistributedArgHandler(location=MODEL_CONFIGS_PATH, lock_timeout=timeout, scan_limit=1)
+    return utils.DistributedArgHandler(location=MODEL_CONFIGS_PATH, lock_timeout=timeout, scan_limit=500)
 
 class Worker:
     """
