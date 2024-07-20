@@ -120,10 +120,6 @@ class DistributedArgHandler:
                         return obj
             except:
                 continue  # If we fail to acquire the lock or read the file, try another
-            finally:
-                # Explicitly remove the lock file after it's released
-                if os.path.exists(lock_path):
-                    os.remove(lock_path)
         
         return None  # If we've exhausted our retries, return None
 
