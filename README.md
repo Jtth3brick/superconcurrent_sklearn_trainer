@@ -59,3 +59,5 @@ The object-oriented argument handling and results saving allows for easy additio
 - Make sure all hyperparameters can still be searched in the case of early stop:
     - Manager could have a way of knowing it's status in adding arguments to the queue.
     - Workers could hold their lock until completion, only then deleting their model_config object from the arg queue.
+- Add soft-stop global signal to allow for pausing without losing 1 model arg per process
+

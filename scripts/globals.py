@@ -13,6 +13,7 @@ import pickle
 import shutil
 import argparse
 import zipfile
+from tqdm import tqdm
 from typing import List, Any, Optional
 from dataclasses import dataclass, field
 from typing import Any, List, Dict, Tuple

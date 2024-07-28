@@ -150,27 +150,34 @@ class DistributedArgHandler:
             with open(file_path, 'wb') as f:
                 pickle.dump(obj, f)
 
-    def get_all(self, limit: int = None) -> List[Any]:
+    def get_all(self, limit: int = None, report_status=False) -> List[Any]:
         """
         Retrieve (but do not remove) multiple ModelConfig objects from the distributed storage.
-
         NOT CONCURRENT SAFE
         NO UNIQUENESS GUARANTEES
         NO TIME COMPLEXITY GUARANTEES
-
         This method quickly reads multiple objects without using locks,
         assuming no concurrent access. It does not modify the storage.
-
         Args:
-            limit (int, optional): Maximum number of objects to retrieve.
-                                   If None, retrieves all available objects.
-
+        limit (int, optional): Maximum number of objects to retrieve.
+        If None, retrieves all available objects.
+        report_status (bool, optional): If True, shows a progress bar.
         Returns:
-            List[Any]: A list of ModelConfig objects.
+        List[Any]: A list of ModelConfig objects.
         """
         results = []
+        
+        # Get the total number of .pkl files
+        total_files = sum(1 for entry in os.scandir(self.location) if entry.name.endswith('.pkl'))
+        
+        # Use limit if provided, otherwise use total_files
+        total = min(limit, total_files) if limit is not None else total_files
+
         with os.scandir(self.location) as it:
-            for entry in it:
+            # Wrap the iterator with tqdm if report_status is True
+            iterator = tqdm(it, total=total, disable=not report_status, desc="Loading objects")
+            
+            for entry in iterator:
                 if entry.name.endswith('.pkl'):
                     if limit is not None and len(results) >= limit:
                         break
@@ -182,6 +189,11 @@ class DistributedArgHandler:
                     except:
                         # If we fail to read a file, just skip it
                         continue
+                    
+                    # Update the progress bar description
+                    if report_status:
+                        iterator.set_description(f"Loaded {len(results)} objects")
+
         return results
 
     def _scan_dir(self) -> list:
