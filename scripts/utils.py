@@ -175,9 +175,10 @@ class DistributedArgHandler:
 
         with os.scandir(self.location) as it:
             # Wrap the iterator with tqdm if report_status is True
-            iterator = tqdm(it, total=total, disable=not report_status, desc="Loading objects")
+            iterator = tqdm(total=total, disable=not report_status, desc="Loading objects")
             
-            for entry in iterator:
+            last_percent = -1
+            for entry in it:
                 if entry.name.endswith('.pkl'):
                     if limit is not None and len(results) >= limit:
                         break
@@ -186,14 +187,19 @@ class DistributedArgHandler:
                         with open(file_path, 'rb') as f:
                             obj = pickle.load(f)
                         results.append(obj)
+                        
+                        # Update progress bar only when percentage changes
+                        current_percent = math.floor((len(results) / total) * 100)
+                        if report_status and current_percent > last_percent:
+                            iterator.update(current_percent - last_percent)
+                            iterator.set_description(f"Loaded {len(results)} objects ({current_percent}%)")
+                            last_percent = current_percent
                     except:
                         # If we fail to read a file, just skip it
                         continue
-                    
-                    # Update the progress bar description
-                    if report_status:
-                        iterator.set_description(f"Loaded {len(results)} objects")
 
+        if report_status:
+            iterator.close()
         return results
 
     def _scan_dir(self) -> list:
