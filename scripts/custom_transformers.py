@@ -18,13 +18,11 @@ class SoftVotingEnsemble:
             for i in range(1, len(model_classes)):
                 assert np.array_equal(model_classes[0], model_classes[i]), \
                     f"Model classes mismatch between {self.models[0][0]} and {self.models[i][0]}"
+            # Assign classes_ attribute to the ensemble
+            self.classes_ = self.models[0][1].classes_
         except AttributeError as e:
-            print(f"WARNING: Could not validate class order that may be assumed in voting. Please verify order matchings accordingly:\n{e}")
+            print(f"WARNING: Could not validate class order that may be assumed in voting. Please verify order matchings accordingly:\n\t{e}")
         
-
-        # Assign classes_ attribute to the ensemble
-        self.classes_ = self.models[0][1].classes_
-
     def predict_proba(self, X):
         # Get probability predictions from all models
         probas = [model[1].predict_proba(X) for model in self.models]
