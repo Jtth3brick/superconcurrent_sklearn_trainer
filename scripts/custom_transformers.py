@@ -13,10 +13,14 @@ class SoftVotingEnsemble:
         self.models = estimators
 
         # Check that all models have the same classes in the same order
-        model_classes = [model[1].classes_ for model in self.models]
-        for i in range(1, len(model_classes)):
-            assert np.array_equal(model_classes[0], model_classes[i]), \
-                   f"Model classes mismatch between {self.models[0][0]} and {self.models[i][0]}"
+        try:
+            model_classes = [model[1].classes_ for model in self.models]
+            for i in range(1, len(model_classes)):
+                assert np.array_equal(model_classes[0], model_classes[i]), \
+                    f"Model classes mismatch between {self.models[0][0]} and {self.models[i][0]}"
+        except AttributeError as e:
+            print(f"WARNING: Could not validate class order that may be assumed in voting. Please verify order matchings accordingly:\n{e}")
+        
 
         # Assign classes_ attribute to the ensemble
         self.classes_ = self.models[0][1].classes_
