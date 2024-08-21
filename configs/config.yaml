@@ -237,3 +237,47 @@ validate_D2: #
   include_same_patient_samples: false
   config:
     Cohort: ['Germany_elinav']
+
+evaluate_israel:
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['Israel_elinav']
+
+evaluate_germany:
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['Germany_elinav']
+
+evaluate_china:
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: [China_jia]
+
+evaluate_ireland:
+  include_intervention: false
+  include_remission: false
+  include_antibiotics: false
+  include_surgery: false
+  include_children: false
+  combine_uc_and_cd: true
+  include_same_patient_samples: false
+  config:
+    Cohort: ['Ireland_hill']
