@@ -19,7 +19,7 @@ class SoftVotingEnsemble:
                 assert np.array_equal(model_classes[0], model_classes[i]), \
                     f"Model classes mismatch between {self.models[0][0]} and {self.models[i][0]}"
             # Assign classes_ attribute to the ensemble
-            self.classes_ = self.models[0][1].classes_
+            self.classes_ = self.models[0].classes_
         except AttributeError as e:
             print(f"WARNING: Could not validate class order that may be assumed in voting. Please verify order matchings accordingly:\n\t{e}")
         
