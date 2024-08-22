@@ -269,7 +269,7 @@ evaluate_china:
   combine_uc_and_cd: true
   include_same_patient_samples: false
   config:
-    Cohort: [China_jia]
+    Cohort: ['China_jia']
 
 evaluate_ireland:
   include_intervention: false

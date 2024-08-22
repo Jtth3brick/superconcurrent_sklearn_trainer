@@ -14,7 +14,7 @@ class SoftVotingEnsemble:
 
         # Check that all models have the same classes in the same order
         try:
-            model_classes = [model[1].classes_ for model in self.models]
+            model_classes = [model.classes_ for model in self.models]
             for i in range(1, len(model_classes)):
                 assert np.array_equal(model_classes[0], model_classes[i]), \
                     f"Model classes mismatch between {self.models[0][0]} and {self.models[i][0]}"
@@ -25,7 +25,7 @@ class SoftVotingEnsemble:
         
     def predict_proba(self, X):
         # Get probability predictions from all models
-        probas = [model[1].predict_proba(X) for model in self.models]
+        probas = [model.predict_proba(X) for model in self.models]
         # Sum probabilities
         sum_probas = np.sum(probas, axis=0)
         # Normalize probabilities so that they sum to 1 for each instance
