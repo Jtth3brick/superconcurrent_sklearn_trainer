@@ -1,0 +1,13 @@
+Manager:
+- assemble hyperparams
+- cross-join with trains
+- prepare metadata features (condition, age, gender)
+
+Worker:
+- get (hyperparam, split)
+- fit
+- return cv-score, eval-score, top-10 species
+
+
+generate_split_config
+    - worker's get)split_arg

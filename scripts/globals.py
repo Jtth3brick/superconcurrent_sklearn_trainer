@@ -14,6 +14,7 @@ import shutil
 import argparse
 import zipfile
 import math
+import sqlite3
 from tqdm import tqdm
 from typing import List, Any, Optional
 from dataclasses import dataclass, field
@@ -27,7 +28,6 @@ from filelock import FileLock
 
 import numpy as np
 import pandas as pd
-
 from sklearn.pipeline import Pipeline
 from sklearn.base import clone
 from sklearn.model_selection import StratifiedKFold

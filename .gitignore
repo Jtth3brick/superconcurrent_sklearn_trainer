@@ -24,3 +24,5 @@ logs/
 
 # Preserve gitkeep files to keep empty dirs
 !.gitkeep
+
+*.sqlite3

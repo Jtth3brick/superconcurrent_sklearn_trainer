@@ -1,0 +1,28 @@
+(base) jeshua@Jeshuas-Laptop scripts % sqlite3 ../data/ibd_microbiome.sqlite3 .schema
+CREATE TABLE taxa (
+        taxon_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        taxon_name TEXT UNIQUE
+    , is_pathogen INTEGER DEFAULT 0, pathogen_type TEXT);
+CREATE TABLE sqlite_sequence(name,seq);
+CREATE TABLE IF NOT EXISTS "patients"(
+  patient_id TEXT,
+  age INT,
+  gender TEXT,
+  condition TEXT,
+  country TEXT,
+  cohort TEXT
+);
+CREATE TABLE IF NOT EXISTS "genomic_sequence_rpm" (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run TEXT,
+        taxon_id INTEGER,
+        rpm REAL,
+        FOREIGN KEY (run) REFERENCES runs(run),
+        FOREIGN KEY (taxon_id) REFERENCES taxa(taxon_id),
+        UNIQUE(run, taxon_id)
+    );
+CREATE TABLE IF NOT EXISTS "runs" (run TEXT PRIMARY KEY, patient_id TEXT, remission INTEGER, intervention INTEGER, antibiotics INTEGER, surgery INTEGER, FOREIGN KEY (patient_id) REFERENCES patients(patient_id));
+CREATE VIEW cleaned_runs AS SELECT run, patient_id, COALESCE(remission, 0) AS remission, COALESCE(intervention, 0) AS intervention, COALESCE(antibiotics, 0) AS antibiotics, COALESCE(surgery, 0) AS surgery, CASE WHEN runs.remission IS NULL OR runs.intervention IS NULL OR runs.antibiotics IS NULL OR runs.surgery IS NULL THEN 1 ELSE 0 END AS modified FROM runs
+/* cleaned_runs(run,patient_id,remission,intervention,antibiotics,surgery,modified) */;
+CREATE VIEW cleaned_patients AS SELECT patient_id, COALESCE(age, 45) AS age, COALESCE(gender, 'Female') AS gender, cohort, CASE WHEN patients.age IS NULL OR patients.gender IS NULL THEN 1 ELSE 0 END AS modified FROM patients
+/* cleaned_patients(patient_id,age,gender,cohort,modified) */;

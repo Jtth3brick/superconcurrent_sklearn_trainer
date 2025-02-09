@@ -1,0 +1,59 @@
+sql_queries:
+  # All filtered runs
+  all_filtered_runs: |
+    SELECT DISTINCT r.run
+    FROM cleaned_runs r
+    JOIN cleaned_patients p ON r.patient_id = p.patient_id
+    WHERE r.intervention = 0
+      AND r.remission = 0
+      AND r.antibiotics = 0
+      AND r.surgery = 0
+      AND p.age >= 18
+      AND r.run IN (
+        SELECT r2.run
+        FROM cleaned_runs r2
+        JOIN cleaned_patients p2 ON r2.patient_id = p2.patient_id
+        WHERE r2.patient_id = r.patient_id
+        ORDER BY p2.modified ASC, r2.modified ASC
+        LIMIT 1
+      )
+
+  train_U1: ['USA_hmbp', 'USA_qiita', 'USA_umass']
+  validate_U1: ['USA_prism']
+  train_U2: ['USA_prism', 'USA_qiita', 'USA_umass']
+  validate_U2: ['USA_hmbp']
+  train_A1: ['USA_hmbp', 'China_jia', 'Germany_elinav']
+  validate_A1: ['Ireland_hill']
+  train_A2: ['USA_hmbp', 'Ireland_hill', 'Germany_elinav']
+  validate_A2: ['China_jia']
+  train_B1: ['USA_hmbp', 'China_jia', 'Israel_elinav']
+  validate_B1: ['Ireland_hill']
+  train_B2: ['Ireland_hill', 'USA_hmbp', 'Israel_elinav']
+  validate_B2: ['China_jia']
+  validate_C1: ['Israel_elinav']
+
+  train_C2: ['Ireland_hill', 'USA_hmbp', 'Israel_elinav']
+  validate_C2: ['Germany_elinav']
+
+  train_D1: ['USA_hmbp', 'Germany_elinav', 'China_jia']
+  validate_D1: ['Israel_elinav']
+
+  train_D2: ['USA_hmbp', 'China_jia', 'Israel_elinav']
+  validate_D2: ['Germany_elinav']
+
+  train_E1: ['Ireland_hill', 'China_jia', 'Germany_elinav']
+  validate_E1: ['Israel_elinav']
+
+  train_E2: ['Ireland_hill', 'Israel_elinav', 'Germany_elinav']
+  validate_E2: ['China_jia']
+
+  train_F1: ['Ireland_hill', 'China_jia', 'Germany_elinav']
+  validate_F1: ['USA_hmbp']
+  
+  train_F2: ['Ireland_hill', 'Israel_elinav', 'Germany_elinav']
+  validate_F2: ['USA_prism']
+
+  evaluate_israel: ['Israel_elinav']
+  evaluate_germany: ['Germany_elinav']
+  evaluate_china: ['China_jia']
+  evaluate_ireland: ['Ireland_hill']
