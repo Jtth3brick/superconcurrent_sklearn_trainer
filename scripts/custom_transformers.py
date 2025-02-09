@@ -5,38 +5,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import Lasso
 from sklearn.preprocessing import StandardScaler
 
-class SoftVotingEnsemble:
-    def __init__(self, estimators):
-        """
-        Models is a list of tuples where first elem is model name and second elem is model
-        """
-        self.models = estimators
-
-        # Check that all models have the same classes in the same order
-        try:
-            model_classes = [model.classes_ for model in self.models]
-            for i in range(1, len(model_classes)):
-                assert np.array_equal(model_classes[0], model_classes[i]), \
-                    f"Model classes mismatch between {self.models[0][0]} and {self.models[i][0]}"
-            # Assign classes_ attribute to the ensemble
-            self.classes_ = self.models[0].classes_
-        except AttributeError as e:
-            print(f"WARNING: Could not validate class order that may be assumed in voting. Please verify order matchings accordingly:\n\t{e}")
-        
-    def predict_proba(self, X):
-        # Get probability predictions from all models
-        probas = [model.predict_proba(X) for model in self.models]
-        # Sum probabilities
-        sum_probas = np.sum(probas, axis=0)
-        # Normalize probabilities so that they sum to 1 for each instance
-        norm_probas = sum_probas / np.sum(sum_probas, axis=1, keepdims=True)
-        return norm_probas
-
-    def predict(self, X):
-        norm_probas = self.predict_proba(X)
-        # Predict the class with the highest average probability
-        return np.argmax(norm_probas, axis=1)
-
+# TODO: enable feature pass through after transform for feature importance
 
 class PassThroughTransformer(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
@@ -47,56 +16,6 @@ class PassThroughTransformer(BaseEstimator, TransformerMixin):
 
     def get_params(self):
         return None
-
-class ZeroColumnRemover(BaseEstimator, TransformerMixin):
-    def __init__(self):
-        self.columns_to_drop = []
-
-    def fit(self, X, y=None):
-        # Check if X is a DataFrame
-        if not isinstance(X, pd.DataFrame):
-            raise ValueError("The input data should be a DataFrame")
-
-        # Find columns where all values are zero
-        self.columns_to_drop = X.columns[(X == 0).all()].tolist()
-
-        return self
-
-    def transform(self, X):
-        # Check if X is a DataFrame
-        if not isinstance(X, pd.DataFrame):
-            raise ValueError("The input data should be a DataFrame")
-
-        # Drop the zero columns
-        return X.drop(columns=self.columns_to_drop)
-
-
-class CustomColumnDropper(BaseEstimator, TransformerMixin):
-    def __init__(self, Age=False, Gender=False, sum_known_pathogenic_bacteria=False,
-                 sum_known_pathogenic_eukaryota=False, sum_known_pathogenic_viruses=False):
-        """
-        WIP: It'd be nice if this did not hardcode drop cols and rather took in a dynamic list of columns to drop.
-        False => don't drop column
-        Function mainly for testing utility of metadata/derived columns
-        """
-        self.Age = Age
-        self.Gender = Gender
-        self.sum_known_pathogenic_bacteria = sum_known_pathogenic_bacteria
-        self.sum_known_pathogenic_eukaryota = sum_known_pathogenic_eukaryota
-        self.sum_known_pathogenic_viruses = sum_known_pathogenic_viruses
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X, y=None):
-        to_drop = []
-        drop_dict = {'Age': self.Age, 'Gender': self.Gender, 'sum_known_pathogenic_bacteria': self.sum_known_pathogenic_bacteria,
-                     'sum_known_pathogenic_eukaryota': self.sum_known_pathogenic_eukaryota, 'sum_known_pathogenic_viruses': self.sum_known_pathogenic_viruses}
-        for column, drop in drop_dict.items():
-            if drop:
-                to_drop.append(column)
-        return X.drop(to_drop, axis=1)
-
 
 class ThresholdApplier(BaseEstimator, TransformerMixin):
     """
