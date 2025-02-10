@@ -4,24 +4,6 @@ n_extract_features: 10
 pipe_config_path: 'configs/pipe_configs.yaml'
 db_name: 'ibd_microbiome.sqlite3'
 
-# Returns non-duplicate, filtered patients and cohort table. Later filtering is done in memory
-filtered_runs: |
-  SELECT DISTINCT r.run, p.cohort
-  FROM cleaned_runs r
-  JOIN cleaned_patients p ON r.patient_id = p.patient_id
-  WHERE r.intervention = 0
-    AND r.remission = 0
-    AND r.antibiotics = 0
-    AND r.surgery = 0
-    AND p.age >= 18
-    AND r.run IN (
-      SELECT r2.run
-      FROM cleaned_runs r2
-      JOIN cleaned_patients p2 ON r2.patient_id = p2.patient_id
-      WHERE r2.patient_id = r.patient_id
-      ORDER BY p2.modified ASC, r2.modified ASC, r2.run
-      LIMIT 1
-    )
 
 split_cohorts:
   train_U1: ['USA_hmbp', 'USA_qiita', 'USA_umass']

@@ -218,89 +218,57 @@ class DistributedArgHandler:
                     count += 1
         return count
 
-@dataclass
-class ModelConfig:
-    """
-    Contains everything needed to train one model and view its scores after the fact.
-    
-    Attributes:
-        split_name (str): Identifier for the data split.
-        - Filled by manager
-        pipeline_name (str): Name of pipeline, e.g. 'enet', 'rf'
-        - Filled by manager
-        _pipeline_struct (Pipeline): The pipeline structure for preprocessing and modeling. 
-        - Filled by manager
-        _pipeline_hyperparams (Dict[str, Any]): Dictionary of hyperparameters for the pipeline. This variable must be copied before any fitting.
-        - Filled by manager
-        config_hash (str): The identifier of the model, specific to hyperparameters and split.
-        - Filled automatically after initialization
-        cv_scores (List[float]): List of cross-validation AUC scores of the model. Added after fitting and before saving.
-        - Filled by worker if cv=true
-        validate_score (float): optional AUC score of model applied to validate substitution (see readme)
-        - Filled by worker if validate=true
-        top_features List[str]: list of top features where if extractable
-    """
-    split_name: str
-    pipeline_name: str
-    _pipeline_struct: Pipeline
-    _pipeline_hyperparameters: Dict[str, Any]
-    cv_scores: List[float] = field(default_factory=list, repr=False)
-    validate_score: float = field(default=None, repr=False)
-    top_features: List[str] # of len n_extract_features if model allows
-    config_hash: str = field(default=None, repr=False)
-
-    def __post_init__(self):
-        """
-        Post-initialization to ensure the config_hash is generated automatically.
-        """
-        self.config_hash = self.create_hash()
-
-    def create_hash(self) -> str:
-        """
-        Generates a SHA-256 hash that uniquely identifies the configuration by combining
-        the pipeline_hyperparameters and split_name.
-        """
-        # Convert the dictionary of hyperparameters to a sorted string to ensure consistent hash generation
-        hyperparams_str = str(sorted(self._pipeline_hyperparameters.items()))
-        unique_str = f"{hyperparams_str}{self.split_name}"
-        return hashlib.sha256(unique_str.encode()).hexdigest()
-    
-    def get_empty_pipe(self) -> Pipeline:
-        pipe_struct = copy.deepcopy(self._pipeline_struct)
-        hyper_params = copy.deepcopy(self._pipeline_hyperparameters)
-
-        return pipe_struct.set_params(**hyper_params)
-
-    def __str__(self):
-        return (f"ModelConfig(\n"
-                f"  Config Hash: {self.config_hash}\n"
-                f"  Split Name: {self.split_name}\n"
-                f"  Pipeline Name: {self.pipeline_name}\n"
-                f"  Pipeline Structure: {self._pipeline_struct}\n"
-                f"  Hyperparameters: {self._pipeline_hyperparameters}\n"
-                f")")
-    validate_data: pd.DataFrame
-
-@dataclass
+@dataclass(frozen=True)
 class SplitConfig:
     """
     Contains data to train a model on.
 
     Attributes:
         split_name (str): Identifier for the data split.
-        train_query (str): SQL query to get training data.
-        validate_query (str): SQL query to get validation data.
-        column_order (List[str]): List of column names in order to match training schema.
-        cv_indexes (List[Tuple[np.ndarray, np.ndarray]]): Contains the splits for cross validation.
-        - None iff cv is False
+        X_train (pd.DataFrame): Training features.
+        y_train (pd.DataFrame): Training labels.
+        X_val (Optional[pd.DataFrame]): Validation features, if validation is enabled. Assumed to have same columns as X_train.
+        y_val (Optional[pd.DataFrame]): Validation labels, if validation is enabled.
+        cv_indexes (List[np.ndarray]): Contains the splits for cross validation.
+                                     None if cv is False.
     """
-    split_name: str,
-    schema: List[str],
-    X_train: np.ndarray,
-    y_train: np.ndarray,
-    X_val: Optional[np.ndarray],
-    y_val: Optional[np.ndarray],
-    cv_indexes: List[np.ndarray],
+    split_name: str
+    X_train: pd.DataFrame
+    y_train: pd.DataFrame
+    X_val: Optional[pd.DataFrame]
+    y_val: Optional[pd.DataFrame]
+    cv_indexes: List[np.ndarray]
+    
+    # Private field for cleaned column names, populated by sanitize_columns()
+    _cleaned_cols: List[str] = field(init=False, default_factory=list, repr=False)
+    
+    @property
+    def cleaned_cols(self) -> List[str]:
+        """Get the cleaned column names"""
+        return self._cleaned_cols
+    
+    def __post_init__(self) -> None:
+        """
+        Sanitize the column names based on the original schema and update the DataFrame attributes.
+        For each column:
+          - Replace non-alphanumeric characters with underscores.
+          - Convert to lower-case.
+          - Prepend with "f_<index>_".
+          - Append the first 4 characters of the SHA-256 hash of the original name.
+        """
+        cleaned = []
+        for i, col in enumerate(self.X_train.columns):
+            # Convert to lowercase and replace non-alphanumeric with underscore
+            clean_name = re.sub(r'[^a-zA-Z0-9]', '_', col.lower())
+            
+            # Generate hash of original name
+            name_hash = hashlib.sha256(col.encode()).hexdigest()[:4]
+            
+            # Create final column name
+            final_name = f"f_{i}_{clean_name}_{name_hash}"
+            cleaned.append(final_name)
+            
+        object.__setattr__(self, '_cleaned_cols', cleaned)
 
 @dataclass
 class ModelConfig:
@@ -315,26 +283,41 @@ class ModelConfig:
         cv_scores (List[float]): Cross-validation AUC scores.
         validate_score (float): Optional validation AUC score.
         config_hash (str): Unique identifier generated based on configuration.
-        top_k_features (Dict[str, float]): Top k features and their importance scores.
+        top_k_features (Optional[Dict[str, float]]): Top k most important features
     """
+    # set by manager
     split_name: str
     pipeline_name: str
-    _pipeline_struct: 'Pipeline'
-    _pipeline_hyperparameters: dict
-    cv_scores: list = field(default_factory=list, repr=False)
-    validate_score: float = field(default=None, repr=False)
-    config_hash: str = field(default=None, repr=False)
-    top_k_features: dict = field(default_factory=dict, repr=False)
+    _pipeline_struct: Pipeline
+    _pipeline_hyperparameters: Dict[str, Any]
 
-    def __post_init__(self):
-        self.config_hash = self.create_hash()
+    # set by worker after fitting
+    model: Optional[Pipeline] = field(default=None, repr=False)
+    cv_scores: List[float] = field(default_factory=list, repr=False)
+    validate_score: float = field(default=None, repr=False)
+    top_k_features: Optional[Dict[str, float]] = None  # top k features as a dict mapping feature name to importance
+
+    _config_hash: str = field(default=None, repr=False)
+
+    @property
+    def config_hash(self) -> str:
+        """
+        Returns the config hash.
+        """
+        if self._config_hash is None:
+            self._config_hash = self.create_hash()
+        return self._config_hash
 
     def create_hash(self) -> str:
+        """
+        Uses pipeline_hyperparameters and split_name.
+        """
         hyperparams_str = str(sorted(self._pipeline_hyperparameters.items()))
         unique_str = f"{hyperparams_str}{self.split_name}"
         return hashlib.sha256(unique_str.encode()).hexdigest()
     
     def get_empty_pipe(self) -> 'Pipeline':
+        """Returns a fresh copy of the pipeline with hyperparameters set"""
         pipe_struct = copy.deepcopy(self._pipeline_struct)
         hyper_params = copy.deepcopy(self._pipeline_hyperparameters)
         return pipe_struct.set_params(**hyper_params)
@@ -346,15 +329,89 @@ class ModelConfig:
                 f"  Pipeline Name: {self.pipeline_name}\n"
                 f"  Pipeline Structure: {self._pipeline_struct}\n"
                 f"  Hyperparameters: {self._pipeline_hyperparameters}\n"
-                f"  Top Features: {list(self.top_k_features.keys())}\n"
+                f"  Top Features: {list(self.top_k_features.keys()) if self.top_k_features is not None else None}\n"
                 f")")
 
-def get_topK_features(fitted_pipe: Pipeline, k: int) -> List[str]:
+def extract_topK_features(pipe, k=10):
     """
-    Hardcoded method that attempts to subjectively extract the top k features from a fitted pipeline.
+    Extracts top K features from a fitted pipeline based on feature importance or coefficients.
+    
+    This function assumes:
+      1. The final step of your pipeline is named "model".
+      2. The final estimator has either a `feature_importances_` or `coef_` attribute.
+      3. You have preserved feature names (for example, by fitting a pandas DataFrame
+         or implementing `get_feature_names_out` in earlier steps).
+
+    Parameters
+    ----------
+    pipe : sklearn.pipeline.Pipeline
+        A scikit-learn pipeline that has already been fitted.
+    k : int, default=10
+        Number of top features to extract.
+
+    Returns
+    -------
+    dict
+        Dictionary of the form {feature_name: importance}, sorted by absolute importance,
+        containing up to `k` features. Returns an empty dictionary if the function cannot
+        determine feature names or importance scores.
     """
-   #TODO: implement sklearn native ability in custom_transformers, etc.
-    raise NotImplementedError()
+    logger.debug("Starting extract_topK_features with k=%d", k)
+    
+    model = None
+    feature_names = None
+
+    # Attempt to locate the final model (assuming its step name is 'model')
+    if "model" in pipe.named_steps:
+        model = pipe.named_steps["model"]
+        logger.debug("Found final model in pipeline: %s", type(model).__name__)
+        
+        # Attempt to retrieve feature names directly from pipeline
+        if hasattr(pipe, "feature_names_in_"):
+            feature_names = pipe.feature_names_in_
+            logger.debug("Using pipeline.feature_names_in_: %s", feature_names[:5])
+        else:
+            # Otherwise, check if any intermediate step provides get_feature_names_out()
+            for name, step in pipe.named_steps.items():
+                if hasattr(step, "get_feature_names_out"):
+                    feature_names = step.get_feature_names_out()
+                    logger.debug("Using get_feature_names_out() from step '%s': %s", 
+                                 name, feature_names[:5])
+                    break
+    else:
+        logger.debug("No final step named 'model' found. Returning empty dict.")
+        return {}
+
+    # If we still don't have a model or feature names, return empty
+    if model is None or feature_names is None:
+        logger.info("No model or feature names found. Returning empty dict.")
+        return {}
+
+    # Get importance scores from model
+    if hasattr(model, "feature_importances_"):
+        logger.debug("Using feature_importances_ from model '%s'.", type(model).__name__)
+        importance_scores = model.feature_importances_
+    elif hasattr(model, "coef_"):
+        logger.debug("Using coef_ from model '%s'.", type(model).__name__)
+        coef = model.coef_
+        # Use absolute values of coefficients (handle multi-dimensional coef for multi-class)
+        importance_scores = abs(coef[0] if coef.ndim > 1 else coef)
+    else:
+        logger.info("Model '%s' has no feature_importances_ or coef_. Returning empty dict.", 
+                    type(model).__name__)
+        return {}
+
+    # Create dictionary pairing feature names with importance scores
+    feature_importance = dict(zip(feature_names, importance_scores))
+
+    # Sort by the magnitude of importance and select the top k
+    sorted_by_importance = sorted(feature_importance.items(),
+                                  key=lambda x: abs(x[1]),
+                                  reverse=True)
+    top_k_feats = dict(sorted_by_importance[:k])
+    
+    logger.info("Returning top %d features out of %d total.", k, len(feature_importance))
+    return top_k_feats
 
 def prep_search(pipeline_config: dict):
     """
@@ -388,69 +445,83 @@ def prep_search(pipeline_config: dict):
 
     return pipeline, param_grids
 
-def get_data(query: str, schema: Optional[List[str]] = None) -> Union[Tuple[np.ndarray, List[str]], np.ndarray]:
+def get_data(split, schema=None):
     """
-    Get data from database using a query that returns run IDs, optionally fitting to a schema.
-    
-    Parameters
-    ----------
-    query : str
-        SQL query that returns a list of run IDs (like those in queries.yaml)
-    schema : Optional[List[str]]
-        Optional list of feature names to fit the returned data to.
-        If not provided, returns both data and the schema.
-    
-    Returns
-    -------
-    If schema provided:
-        np.ndarray: Data matrix with rows matching query runs and columns matching schema
-    If no schema:
-        Tuple[np.ndarray, List[str]]: Data matrix and list of feature names
+    Retrieve the microbiome dataset for a given split (train or validate).
+    Returns:
+        X (pd.DataFrame): Feature matrix with taxa readcounts and patient info (age, gender).
+        y (pd.Series): Binary labels (0 = Healthy, 1 = UC/CD) for each sample.
     """
-    # Todo: make sure encoding is done properly
-
-    # Get run IDs from query
-    runs_df = load_dataframe(query)
-    runs = runs_df['run'].tolist()
+    # Connect to database
+    engine = sqlite3.connect(DB_PATH)
     
-    if not runs:
-        return np.array([]) if schema else (np.array([]), [])
-        
-    # Build placeholder list for SQL
-    runs_placeholder = ", ".join(f"'{run}'" for run in runs)
+    # Validate split input
+    if split not in ('train', 'validate'):
+        raise ValueError("split must be 'train' or 'validate'")
     
-    # Get genomic features
-    features_query = f"""
-        SELECT r.run, t.taxon_name, g.rpm
-        FROM runs r
-        LEFT JOIN genomic_sequence_rpm g ON r.run = g.run
-        LEFT JOIN taxa t ON g.taxon_id = t.taxon_id
-        WHERE r.run IN ({runs_placeholder})
+    # Assume `config` is a global dict from the YAML configuration and `engine` is a database connection.
+    cohorts = CONFIG['split_cohorts'][split]  # e.g., list of cohort names for the split
+    # Format cohort list for SQL IN clause
+    cohort_list_str = "', '".join(cohorts)
+    
+    # SQL query to get all runs for the desired cohorts, along with patient metadata (age, gender, condition)
+    query_runs = f"""
+        SELECT f.run_id, f.patient_id, f.cohort,
+               p.age AS age, p.gender AS gender,
+               q.condition AS condition
+        FROM filtered_runs AS f
+        JOIN cleaned_patients AS p 
+          ON f.patient_id = p.patient_id
+        JOIN patients AS q 
+          ON f.patient_id = q.patient_id
+        WHERE f.cohort IN ('{cohort_list_str}')
     """
-    features_df = load_dataframe(features_query)
+    run_meta_df = pd.read_sql(query_runs, engine)
     
-    # Pivot features into matrix
-    if not features_df.empty and 'taxon_name' in features_df.columns:
-        pivot_df = features_df.pivot_table(
-            index='run',
-            columns='taxon_name',
-            values='rpm',
-            aggfunc='mean',
-            fill_value=0
-        )
-    else:
-        return np.array([]) if schema else (np.array([]), [])
-
-    # If schema provided, reindex to match
+    # Extract the list of run IDs to filter the sequence data
+    run_ids = tuple(run_meta_df['run_id'].tolist())
+    if not run_ids:
+        # No runs found for the given split
+        return pd.DataFrame(), pd.Series(dtype=int)
+    
+    # SQL query to get all nonzero read counts for the selected runs
+    # (Joining with filtered_runs again in case we prefer not to use the run_ids tuple directly)
+    query_seq = f"""
+        SELECT g.run_id, g.taxon, g.rpm
+        FROM genomic_sequence_rpm AS g
+        JOIN filtered_runs AS f 
+          ON g.run_id = f.run_id
+        WHERE f.cohort IN ('{cohort_list_str}') 
+          AND g.rpm > 0
+    """
+    sequence_df = pd.read_sql(query_seq, engine)
+    
+    # Pivot the sequence data to create a sample (run) x taxon matrix of read counts
+    X = sequence_df.pivot_table(index='run_id', columns='taxon', values='rpm', fill_value=0)
+    # Ensure every run from run_meta_df appears in X (fill missing with all zeros)
+    X = X.reindex(run_meta_df['run_id'], fill_value=0)
+    
+    # Add patient age and gender as features in X
+    # (Set index to run_id on run_meta_df for easy alignment)
+    run_meta_df.set_index('run_id', inplace=True)
+    X['age'] = run_meta_df.loc[X.index, 'age']
+    # Map gender to binary: Male -> 0, Female -> 1
+    X['gender'] = run_meta_df.loc[X.index, 'gender'].map({'Male': 0, 'Female': 1})
+    
+    # Create the label series y with binary condition (Healthy=0, UC/CD=1)
+    y = run_meta_df.loc[X.index, 'condition'].map(lambda cond: 0 if cond == 'Healthy' else 1)
+    y = pd.Series(data=y.values, index=X.index, name='condition')
+    
+    # If schema is provided, reorder/add/delete columns to match it
     if schema is not None:
-        missing_cols = set(schema) - set(pivot_df.columns)
-        for col in missing_cols:
-            pivot_df[col] = 0
-        pivot_df = pivot_df[schema]
-        return pivot_df.to_numpy()
-    
-    # Otherwise return data and feature names
-    return pivot_df.to_numpy(), pivot_df.columns.tolist()
+        # Add missing columns with zeros
+        for col in schema:
+            if col not in X.columns:
+                X[col] = 0
+        # Keep only schema columns in specified order
+        X = X[schema]
+        
+    return X, y
 
 def get_logger(context: str = None):
     """

@@ -91,7 +91,7 @@ class Worker:
 
         # train full model
         pipe = model_config.get_empty_pipe()
-        pipe.fit(X_train.copy(), y_train.copy())
+        pipe.fit(self.split_config.X_train.copy(), self.split_config.y_train.copy())
 
         # save fitted pipe
         if save_model:
@@ -101,7 +101,8 @@ class Worker:
         
         # extract top features
         if extract_features:
-            model_config.top_k_features = utils.extract_topK_features(pipe)
+            model_config.top_k_features = utils.extract_topK_features(pipe) #TODO: convert from dict to list
+            self.logger.info(f"Top features extracted: {list(model_config.top_k_features.keys())}")
 
         # Check if we want validate scores
         if self.split_config.validate_data is not None:
@@ -112,22 +113,18 @@ class Worker:
         self.save_queue.put(model_config, obj_name=model_config.config_hash, group_name=model_config.split_name)
     
     def get_cv_scores(self, model_config: utils.ModelConfig) -> List[float]:
-        # X, y = self.split_config.train_data, self.split_config.train_metadata[Y_COL_NAME]
-
-        # scores = []
-        # for cv_split in self.split_config.cv_indexes:
-        #     pipe = model_config.get_empty_pipe()
-        #     cv_train_indices, cv_test_indices = cv_split
-
-        #     X_train, X_test = X.loc[cv_train_indices], X.loc[cv_test_indices]
-        #     y_train, y_test = y.loc[cv_train_indices], y.loc[cv_test_indices]
-        #     pipe.fit(X_train.copy(), y_train.copy())
-        #     y_pred_proba = pipe.predict_proba(X_test)
-        #     score = utils.get_score(y_true=y_test, y_pred_proba=y_pred_proba, trained_classes=pipe.classes_)
-        #     scores.append(score)
-        # return scores
-        # TODO
-        raise NotImplementedError()
+        scores = []
+        for cv_train_indices, cv_test_indices in self.split_config.cv_indexes:
+            pipe = model_config.get_empty_pipe()
+            X_train_cv = self.split_config.X_train.iloc[cv_train_indices]
+            y_train_cv = self.split_config.y_train.iloc[cv_train_indices]
+            X_test_cv = self.split_config.X_train.iloc[cv_test_indices] 
+            y_test_cv = self.split_config.y_train.iloc[cv_test_indices]
+            pipe.fit(X_train_cv.copy(), y_train_cv.copy())
+            y_pred_proba = pipe.predict_proba(X_test_cv)
+            score = utils.get_score(y_true=y_test_cv, y_pred_proba=y_pred_proba, trained_classes=pipe.classes_)
+            scores.append(score)
+        return scores
 
     def ensure_split_config(self, model_config: utils.ModelConfig):
         """
@@ -182,8 +179,6 @@ class Manager:
         self.cv = cv
         self.validate = validate
         self.model_config_queue = get_untrained_model_config_queue(timeout=60*60) # 1 hour timeout for workers
-
-        self.all_train_samples = ... #TODO: use TRAIN_DATA_QUERY on DB_PATH sqlite3 instance to get df
 
     def manage(self):
         """
@@ -266,15 +261,15 @@ class Manager:
 
             # load datasets
             self.logger.info(f"Getting {train_split_name} training data...")
-            X_train, y_train, schema = utils.get_data(all_train_samples, train_split_name)
+            X_train, y_train = utils.get_data(train_split_name)
             self.logger.info(f"Retrieved {train_split_name} train data with shape {X_train.shape}")
 
             self.logger.info(f"Getting {validate_split_name} validate data...")
-            X_val, y_val, _ = utils.get_data(all_train_samples, validate_split_name, schema=schema)
+            X_val, y_val = utils.get_data(validate_split_name, schema=list(X_train.columns))
             self.logger.info(f"Retrieved {validate_split_name} validate data with shape {X_val.shape}")
         else:
             self.logger.info(f"Validation scoring skipped. Getting training data only (split name is {split_name})...")
-            X_train, y_train, schema = utils.filter_data(split_name)
+            X_train, y_train = utils.get_data(split_name)
             self.logger.info(f"Retrieved {split_name} data with shape {X_train.shape}")
 
             # Indicate that validate should not be done
@@ -283,25 +278,24 @@ class Manager:
         # Get indexes for cv splits if cv was indicated
         if self.cv:
             skf = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=SEED)
-            cv_indexes = [] # TODO, fix
-            raise NotImplementedError()
+            cv_indexes = list(skf.split(X_train, y_train))
         else:
             # Indicate CV should not be done
             cv_indexes = None
 
         # Create SplitConfig
-        split_config = SplitConfig(
+        split_config = utils.SplitConfig(
             split_name=split_name,
-            schema=schema,
             X_train=X_train,
-            y_train = y_train,
-            X_val = X_val,
-            y_val = y_val,
-            cv_indexes=cv_indexes,
+            y_train=y_train,
+            X_val=X_val,
+            y_val=y_val,
+            cv_indexes=cv_indexes
         )
 
         return split_config
     
+    @staticmethod
     def prep_directories():
         # Delete model arg queue if it exists
         if MODEL_CONFIGS_PATH.exists():
@@ -315,11 +309,6 @@ class Manager:
         for dir_path in [RESULTS_DIR, MODELS_DIR, WORKING_DATA_DIR, LOGS_DIR]:
             if not os.path.exists(dir_path):
                 os.makedirs(dir_path)
-
-        # Unzip data.csv
-        zip_data_path = DATA_DIR / 'data.csv.zip'
-        with zipfile.ZipFile(zip_data_path, 'r') as zip_ref:
-            zip_ref.extractall(DATA_DIR)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Script to manage or work on machine learning pipelines.")

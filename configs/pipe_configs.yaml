@@ -84,7 +84,6 @@ enet:
       - function: "custom_transformers.LassoFeatureSelector"
         args: {}
         hyperparams:
-  
           alpha: [1, 4, 64]
           threshold: [0.00001, 0.001, 0.1]
     - Normalization:

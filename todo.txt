@@ -9,5 +9,6 @@ Worker:
 - return cv-score, eval-score, top-10 species
 
 
-generate_split_config
-    - worker's get)split_arg
+1) get_data
+2) manager
+3) worker

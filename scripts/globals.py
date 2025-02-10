@@ -1,5 +1,6 @@
 # globals.py
 import os
+import re
 import sys
 import copy
 import time

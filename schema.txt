@@ -1,4 +1,3 @@
-(base) jeshua@Jeshuas-Laptop scripts % sqlite3 ../data/ibd_microbiome.sqlite3 .schema
 CREATE TABLE taxa (
         taxon_id INTEGER PRIMARY KEY AUTOINCREMENT,
         taxon_name TEXT UNIQUE
@@ -22,7 +21,9 @@ CREATE TABLE IF NOT EXISTS "genomic_sequence_rpm" (
         UNIQUE(run, taxon_id)
     );
 CREATE TABLE IF NOT EXISTS "runs" (run TEXT PRIMARY KEY, patient_id TEXT, remission INTEGER, intervention INTEGER, antibiotics INTEGER, surgery INTEGER, FOREIGN KEY (patient_id) REFERENCES patients(patient_id));
-CREATE VIEW cleaned_runs AS SELECT run, patient_id, COALESCE(remission, 0) AS remission, COALESCE(intervention, 0) AS intervention, COALESCE(antibiotics, 0) AS antibiotics, COALESCE(surgery, 0) AS surgery, CASE WHEN runs.remission IS NULL OR runs.intervention IS NULL OR runs.antibiotics IS NULL OR runs.surgery IS NULL THEN 1 ELSE 0 END AS modified FROM runs
-/* cleaned_runs(run,patient_id,remission,intervention,antibiotics,surgery,modified) */;
-CREATE VIEW cleaned_patients AS SELECT patient_id, COALESCE(age, 45) AS age, COALESCE(gender, 'Female') AS gender, cohort, CASE WHEN patients.age IS NULL OR patients.gender IS NULL THEN 1 ELSE 0 END AS modified FROM patients
-/* cleaned_patients(patient_id,age,gender,cohort,modified) */;
+CREATE VIEW cleaned_patients AS SELECT patient_id, COALESCE(age, 45) AS age, COALESCE(gender, 'Female') AS gender, cohort FROM patients
+/* cleaned_patients(patient_id,age,gender,cohort) */;
+CREATE VIEW cleaned_runs AS SELECT run, patient_id, COALESCE(remission, 0) AS remission, COALESCE(intervention, 0) AS intervention, COALESCE(antibiotics, 0) AS antibiotics, COALESCE(surgery, 0) AS surgery FROM runs
+/* cleaned_runs(run,patient_id,remission,intervention,antibiotics,surgery) */;
+CREATE VIEW filtered_runs AS SELECT DISTINCT r.run, p.cohort FROM cleaned_runs r JOIN cleaned_patients p ON r.patient_id = p.patient_id WHERE r.intervention = 0 AND r.remission = 0 AND r.antibiotics = 0 AND r.surgery = 0 AND p.age >= 18 AND r.run IN (SELECT r2.run FROM cleaned_runs r2 JOIN cleaned_patients p2 ON r2.patient_id = p2.patient_id WHERE r2.patient_id = r.patient_id ORDER BY r2.run LIMIT 1)
+/* filtered_runs(run,cohort) */;
