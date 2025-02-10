@@ -85,13 +85,24 @@ class Worker:
     def train_eval_save(self, model_config: utils.ModelConfig, extract_features=True, save_model=True) -> None:
         self.logger.info(f"Training model:\n\t{model_config}")
 
+        # Convert to clean names for model training
+        col_map = {cleaned_name: orig_name for (cleaned_name, orig_name) in zip(self.split_config.X_train.columns, self.split_config.cleaned_cols)}
+        X_train, y_train = self.split_config.X_train.copy(), self.split_config.y_train
+        X_train.columns = self.split_config.cleaned_cols
+        if self.split_config.X_val is not None:
+            X_val = self.split_config.X_val.copy()
+            X_val.columns = self.split_config.cleaned_cols
+            y_val = self.split_config.y_val
+        else:
+            X_val, y_val = None, None
+
         # Check if we should do CV
         if self.split_config.cv_indexes: 
             model_config.cv_scores = self.get_cv_scores(model_config)
 
         # train full model
         pipe = model_config.get_empty_pipe()
-        pipe.fit(self.split_config.X_train.copy(), self.split_config.y_train.copy())
+        pipe.fit(X_train.copy(), y_train.copy())
 
         # save fitted pipe
         if save_model:
@@ -99,13 +110,14 @@ class Worker:
             with open(model_file_path, "wb") as file:
                 pickle.dump(pipe, file)
         
-        # extract top features
+        # extract top features and map back to original names
         if extract_features:
-            model_config.top_k_features = utils.extract_topK_features(pipe) #TODO: convert from dict to list
+            top_k_features = utils.extract_topK_features(pipe)
+            model_config.top_k_features = {col_map[k]: v for k, v in top_k_features.items()}
             self.logger.info(f"Top features extracted: {list(model_config.top_k_features.keys())}")
 
         # Check if we want validate scores
-        if self.split_config.validate_data is not None:
+        if self.split_config.X_val is not None:
             y_pred_proba = pipe.predict_proba(self.split_config.X_val.copy())
             model_config.validate_score = utils.get_score(y_true=self.split_config.y_val, y_pred_proba=y_pred_proba)
 
@@ -116,13 +128,15 @@ class Worker:
         scores = []
         for cv_train_indices, cv_test_indices in self.split_config.cv_indexes:
             pipe = model_config.get_empty_pipe()
-            X_train_cv = self.split_config.X_train.iloc[cv_train_indices]
-            y_train_cv = self.split_config.y_train.iloc[cv_train_indices]
-            X_test_cv = self.split_config.X_train.iloc[cv_test_indices] 
-            y_test_cv = self.split_config.y_train.iloc[cv_test_indices]
-            pipe.fit(X_train_cv.copy(), y_train_cv.copy())
-            y_pred_proba = pipe.predict_proba(X_test_cv)
-            score = utils.get_score(y_true=y_test_cv, y_pred_proba=y_pred_proba, trained_classes=pipe.classes_)
+            X_train, y_train = self.split_config.X_train.copy(), self.split_config.y_train
+            X_train.columns = self.split_config.cleaned_cols
+            X_train_fold = X_train[cv_train_indices]
+            y_train_fold = y_train[cv_train_indices]
+            X_val_fold = X_train[cv_test_indices] 
+            y_val_fold = y_train[cv_test_indices]
+            pipe.fit(X_train_fold.copy(), y_train_fold.copy())
+            y_pred_proba = pipe.predict_proba(X_val_fold)
+            score = utils.get_score(y_true=y_val_fold, y_pred_proba=y_pred_proba, trained_classes=pipe.classes_)
             scores.append(score)
         return scores
 
@@ -217,7 +231,6 @@ class Manager:
         Returns:
             list: A list of interlaced utils.ModelConfig instances ready for model training.
         """
-
         # Load pipeline configurations
         self.logger.info("Loading pipeline configurations.")
         with open(PIPE_CONFIG_PATH, 'r') as f:
@@ -239,7 +252,6 @@ class Manager:
                 _pipeline_struct=pipe_struct,
                 _pipeline_hyperparameters=pipe_hyperparams,
                 cv_scores=[],
-                config_hash=None
             )
             for pipe_hyperparams in pipe_hyperparams_lst]
 

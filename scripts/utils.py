@@ -445,6 +445,19 @@ def prep_search(pipeline_config: dict):
 
     return pipeline, param_grids
 
+def get_score(y_true, y_pred_proba, trained_classes=None):
+    # If 2D array of probabilities is provided, get probabilities for positive class
+    if y_pred_proba.ndim == 2:
+        if trained_classes is not None:
+            # Get index of positive class (1)
+            pos_idx = np.where(trained_classes == 1)[0][0]
+            y_pred_proba = y_pred_proba[:, pos_idx]
+        else:
+            # Default to second column for positive class
+            y_pred_proba = y_pred_proba[:, 1]
+            
+    return roc_auc_score(y_true, y_pred_proba)
+
 def get_data(split, schema=None):
     """
     Retrieve the microbiome dataset for a given split (train or validate).
@@ -455,10 +468,6 @@ def get_data(split, schema=None):
     # Connect to database
     engine = sqlite3.connect(DB_PATH)
     
-    # Validate split input
-    if split not in ('train', 'validate'):
-        raise ValueError("split must be 'train' or 'validate'")
-    
     # Assume `config` is a global dict from the YAML configuration and `engine` is a database connection.
     cohorts = CONFIG['split_cohorts'][split]  # e.g., list of cohort names for the split
     # Format cohort list for SQL IN clause
@@ -466,61 +475,68 @@ def get_data(split, schema=None):
     
     # SQL query to get all runs for the desired cohorts, along with patient metadata (age, gender, condition)
     query_runs = f"""
-        SELECT f.run_id, f.patient_id, f.cohort,
-               p.age AS age, p.gender AS gender,
-               q.condition AS condition
-        FROM filtered_runs AS f
-        JOIN cleaned_patients AS p 
-          ON f.patient_id = p.patient_id
-        JOIN patients AS q 
-          ON f.patient_id = q.patient_id
-        WHERE f.cohort IN ('{cohort_list_str}')
+        WITH filtered_cohort_runs AS (
+            SELECT run
+            FROM filtered_runs
+            WHERE cohort IN ('{cohort_list_str}')
+        )
+        SELECT 
+            f.run,
+            CAST(p.age AS FLOAT) AS age,
+            CASE WHEN p.gender = 'Male' THEN 0
+                 WHEN p.gender = 'Female' THEN 1
+                 ELSE NULL END AS gender,
+            CASE WHEN q.condition = 'Healthy' THEN 0
+                 ELSE 1 END AS condition
+        FROM filtered_cohort_runs f
+        JOIN runs r
+          ON f.run = r.run
+        JOIN cleaned_patients p
+          ON r.patient_id = p.patient_id
+        JOIN patients q
+          ON r.patient_id = q.patient_id
     """
     run_meta_df = pd.read_sql(query_runs, engine)
     
     # Extract the list of run IDs to filter the sequence data
-    run_ids = tuple(run_meta_df['run_id'].tolist())
+    run_ids = tuple(run_meta_df['run'].tolist())
     if not run_ids:
         # No runs found for the given split
         return pd.DataFrame(), pd.Series(dtype=int)
-    
-    # SQL query to get all nonzero read counts for the selected runs
-    # (Joining with filtered_runs again in case we prefer not to use the run_ids tuple directly)
-    query_seq = f"""
-        SELECT g.run_id, g.taxon, g.rpm
+
+    # SQL query to get all nonzero read counts for the selected runs with taxon names
+    query_seq = f""" 
+        SELECT g.run, t.taxon_name AS taxon, g.rpm
         FROM genomic_sequence_rpm AS g
         JOIN filtered_runs AS f 
-          ON g.run_id = f.run_id
-        WHERE f.cohort IN ('{cohort_list_str}') 
-          AND g.rpm > 0
+          ON g.run = f.run
+        JOIN taxa t
+          ON g.taxon_id = t.taxon_id
+        WHERE f.cohort IN ('{cohort_list_str}')
     """
+    # Read sequence data and create feature matrix
     sequence_df = pd.read_sql(query_seq, engine)
-    
-    # Pivot the sequence data to create a sample (run) x taxon matrix of read counts
-    X = sequence_df.pivot_table(index='run_id', columns='taxon', values='rpm', fill_value=0)
-    # Ensure every run from run_meta_df appears in X (fill missing with all zeros)
-    X = X.reindex(run_meta_df['run_id'], fill_value=0)
-    
-    # Add patient age and gender as features in X
-    # (Set index to run_id on run_meta_df for easy alignment)
-    run_meta_df.set_index('run_id', inplace=True)
-    X['age'] = run_meta_df.loc[X.index, 'age']
-    # Map gender to binary: Male -> 0, Female -> 1
-    X['gender'] = run_meta_df.loc[X.index, 'gender'].map({'Male': 0, 'Female': 1})
-    
-    # Create the label series y with binary condition (Healthy=0, UC/CD=1)
-    y = run_meta_df.loc[X.index, 'condition'].map(lambda cond: 0 if cond == 'Healthy' else 1)
-    y = pd.Series(data=y.values, index=X.index, name='condition')
-    
-    # If schema is provided, reorder/add/delete columns to match it
+    sequence_matrix = sequence_df.pivot_table(index='run', columns='taxon', values='rpm', fill_value=0)
+
+    # Set index on metadata once
+    run_meta_df.set_index('run', inplace=True)
+
+    # Merge sequence data with metadata features
+    X = sequence_matrix.merge(run_meta_df[['age', 'gender', 'condition']], 
+                            left_index=True,
+                            right_index=True,
+                            how='left')
+
+    # Extract labels
+    y = pd.Series(data=X.pop('condition').values,
+                 index=X.index, 
+                 name='condition')
+
+    # Apply schema if provided
     if schema is not None:
-        # Add missing columns with zeros
-        for col in schema:
-            if col not in X.columns:
-                X[col] = 0
-        # Keep only schema columns in specified order
-        X = X[schema]
-        
+        missing_cols = set(schema) - set(X.columns)
+        X = X.reindex(columns=schema, fill_value=0)
+
     return X, y
 
 def get_logger(context: str = None):

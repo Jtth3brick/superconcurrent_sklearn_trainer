@@ -130,7 +130,7 @@ class RandomForestFeatureSelector(BaseEstimator, TransformerMixin):
     """
     Select features using Random Forest.
     """
-    def __init__(self, n_estimators=100, threshold=0.001, n_jobs=1):
+    def __init__(self, n_estimators=100, threshold=0.001):
         """
         Initializes the transformer with the number of trees in the forest and the threshold
         for feature importances.
@@ -141,7 +141,7 @@ class RandomForestFeatureSelector(BaseEstimator, TransformerMixin):
         """
         self.n_estimators = n_estimators
         self.threshold = threshold
-        self.model = RandomForestClassifier(n_estimators=self.n_estimators, n_jobs=n_jobs)
+        self.model = RandomForestClassifier(n_estimators=self.n_estimators)
         self._feature_names = None
     
     def fit(self, X, y=None):
