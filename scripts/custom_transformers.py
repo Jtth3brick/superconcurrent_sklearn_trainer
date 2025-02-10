@@ -5,17 +5,21 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import Lasso
 from sklearn.preprocessing import StandardScaler
 
-# TODO: enable feature pass through after transform for feature importance
-
 class PassThroughTransformer(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
+        if isinstance(X, pd.DataFrame):
+            self._feature_names = X.columns
+        else:
+            self._feature_names = None
         return self
-    
+
     def transform(self, X):
         return X
 
-    def get_params(self):
-        return None
+    def get_feature_names_out(self, input_features=None):
+        if self._feature_names is not None:
+            return self._feature_names
+        return input_features
 
 class ThresholdApplier(BaseEstimator, TransformerMixin):
     """
@@ -32,12 +36,14 @@ class ThresholdApplier(BaseEstimator, TransformerMixin):
         """
         self.threshold = threshold
         self.threshold_type = threshold_type
-        self.non_threshold_cols = ['Age', 'Gender', 'sum_known_pathogenic_bacteria', 'sum_known_pathogenic_eukaryota', 'sum_known_pathogenic_viruses']
+        self._feature_names = None
     
     def fit(self, X, y=None):
         """
         This transformer doesn't learn anything from the data, so the fit method just returns self.
         """
+        if isinstance(X, pd.DataFrame):
+            self._feature_names = X.columns
         return self
     
     def transform(self, X):
@@ -50,51 +56,25 @@ class ThresholdApplier(BaseEstimator, TransformerMixin):
         Returns:
             pd.DataFrame: Data with the threshold applied.
         """
+        X_transformed = X.copy()
+
         # Check if threshold_type is valid
         if self.threshold_type not in ['hard', 'soft']:
             raise ValueError("threshold_type must be 'hard' or 'soft'")
         
-        # Create a copy of the DataFrame
-        X_transformed = X.copy()
-        
-        # Columns to apply the threshold
-        threshold_cols = [col for col in X.columns if col not in self.non_threshold_cols]
-        
         # Apply the threshold
         if self.threshold_type == 'hard':
-            X_transformed[threshold_cols] = X_transformed[threshold_cols].where(X_transformed[threshold_cols] >= self.threshold, 0)
+            X_transformed = X_transformed.where(X_transformed >= self.threshold, 0)
         elif self.threshold_type == 'soft':
-            X_transformed[threshold_cols] = X_transformed[threshold_cols] - self.threshold
-            X_transformed[threshold_cols] = X_transformed[threshold_cols].clip(lower=0)
+            X_transformed = X_transformed - self.threshold
+            X_transformed = X_transformed.clip(lower=0)
         
         return X_transformed
-
-    def set_params(self, **params):
-        """
-        Set the parameters of the ThresholdApplier.
-
-        Parameters:
-            params (dict): A dictionary of parameters to set.
-
-        Returns:
-            self
-        """
-        for param, value in params.items():
-            setattr(self, param, value)
-        
-        return self
     
-    def get_params(self, deep=True):
-        """
-        Get the parameters of the ThresholdApplier.
-        
-        Parameters:
-            deep (bool): If True, return a deep copy of the parameters.
-            
-        Returns:
-            dict: A dictionary of the ThresholdApplier parameters.
-        """
-        return {'threshold': self.threshold, 'threshold_type': self.threshold_type}
+    def get_feature_names_out(self, input_features=None):
+        if self._feature_names is not None:
+            return self._feature_names
+        return input_features
 
 class LassoFeatureSelector(BaseEstimator, TransformerMixin):
     def __init__(self, alpha=1.0, threshold=0.01):
@@ -103,21 +83,48 @@ class LassoFeatureSelector(BaseEstimator, TransformerMixin):
         self.lasso = Lasso(alpha=self.alpha, max_iter=1000000)
         self.support_mask = None
         self.scaler = StandardScaler()
-    
+        self._feature_names = None
+
     def fit(self, X, y=None):
-        X = self.scaler.fit_transform(X)
-        self.lasso.fit(X, y)
+        # If X is DataFrame, store original col names
+        if isinstance(X, pd.DataFrame):
+            self._feature_names = X.columns
+            X_array = X.values  # for scaling / Lasso
+        else:
+            # Just store numeric range
+            self._feature_names = np.arange(X.shape[1]).astype(str)
+            X_array = X
+        
+        X_scaled = self.scaler.fit_transform(X_array)
+        self.lasso.fit(X_scaled, y)
         self.support_mask = np.abs(self.lasso.coef_) > self.threshold
+        # If all coefficients < threshold, keep them all (as you already do)
         if not any(self.support_mask):
             self.support_mask = np.array([True] * X.shape[1])
         
         return self
 
     def transform(self, X):
-        if hasattr(X, 'loc'):
-            return X.loc[:, self.support_mask]
+        # Because we stored _feature_names, let's maintain a DataFrame output
+        is_df = isinstance(X, pd.DataFrame)
+        if is_df:
+            X_array = X.values
         else:
-            return X[:, self.support_mask]
+            X_array = X
+        
+        X_scaled = self.scaler.transform(X_array)
+        X_selected = X_scaled[:, self.support_mask]
+        
+        if is_df:
+            # Filter the original column names to just the ones we kept
+            selected_cols = np.array(self._feature_names)[self.support_mask]
+            return pd.DataFrame(X_selected, columns=selected_cols, index=X.index)
+        else:
+            return X_selected
+
+    def get_feature_names_out(self, input_features=None):
+        # Return only the columns that survived
+        return np.array(self._feature_names)[self.support_mask]
 
 class RandomForestFeatureSelector(BaseEstimator, TransformerMixin):
     """
@@ -135,75 +142,45 @@ class RandomForestFeatureSelector(BaseEstimator, TransformerMixin):
         self.n_estimators = n_estimators
         self.threshold = threshold
         self.model = RandomForestClassifier(n_estimators=self.n_estimators, n_jobs=n_jobs)
+        self._feature_names = None
     
     def fit(self, X, y=None):
-        """
-        Fits the Random Forest model and selects the features.
-        
-        Parameters:
-            X (np.ndarray or pd.DataFrame): Input data.
-            y (np.ndarray, pd.Series, or list): Target values.
-            
-        Returns:
-            self
-        """
-        # Check if X and y are not None
         if X is None or y is None:
             raise ValueError("X and y cannot be None")
+
+        self._is_df = isinstance(X, pd.DataFrame)
+        if self._is_df:
+            self._feature_names = X.columns
+            X_array = X.values
+        else:
+            self._feature_names = np.arange(X.shape[1]).astype(str)
+            X_array = X
         
-        # Fit the Random Forest model
-        self.model.fit(X, y)
-        
-        # Get the feature importances from the model
+        # Fit RandomForest
+        self.model.fit(X_array, y)
         self.feature_importances_ = self.model.feature_importances_
-        
-        # Create a mask for features above the threshold
         self.selected_features_ = self.feature_importances_ >= self.threshold
-        
         return self
     
     def transform(self, X):
-        """
-        Removes the features not selected by the Random Forest model.
-
-        Parameters:
-            X (np.ndarray or pd.DataFrame): Input data.
-
-        Returns:
-            np.ndarray or pd.DataFrame: Data with only the features selected by the Random Forest model.
-        """
         # Check if X has the same number of features as the data used in fit
         if X.shape[1] != len(self.selected_features_):
-            raise ValueError("X has a differXent number of features than the data used in fit")
+            raise ValueError("X has a different number of features than the data used in fit")
         
         # Determine if input is DataFrame
         is_dataframe = isinstance(X, pd.DataFrame)
         
-        # Convert input data to numpy array if it's DataFrame
         if is_dataframe:
-            columns = X.columns
-            X = X.values
-        
-        # Remove the features not selected by the Random Forest model
-        if sum(self.selected_features_) > 0:
-            X = X[:, self.selected_features_]
+            X_array = X.values
+        else:
+            X_array = X
 
-            # If original input was DataFrame, convert back to DataFrame
-            if is_dataframe:
-                # Create a mask for the column names
-                selected_columns = np.array(columns)[self.selected_features_]
-                X = pd.DataFrame(X, columns=selected_columns)
+        X_selected = X_array[:, self.selected_features_]
         
-        return X
+        if is_dataframe:
+            selected_columns = np.array(self._feature_names)[self.selected_features_]
+            X_selected = pd.DataFrame(X_selected, columns=selected_columns, index=X.index)
+        return X_selected
     
-    def get_params(self, deep=True):
-        """
-        Get the parameters of the RandomForestFeatureSelector.
-        
-        Parameters:
-            deep (bool): If True, return a deep copy of the parameters.
-            
-        Returns:
-            dict: A dictionary of the RandomForestFeatureSelector parameters.
-        """
-        return {'n_estimators': self.n_estimators, 'threshold': self.threshold}
+    def get_feature_names_out(self, input_features=None):
+        return np.array(self._feature_names)[self.selected_features_]
