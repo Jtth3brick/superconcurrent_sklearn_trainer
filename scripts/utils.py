@@ -19,7 +19,7 @@ class DistributedArgHandler:
     faster processing for single-threaded scenarios.
     """
 
-    def __init__(self, location: str, lock_timeout: int = 60, retry_limit: int = 5, scan_limit: int = 100):
+    def __init__(self, location: str, lock_timeout: int = 60, retry_limit: int = 5, scan_limit: int = 500):
         """
         Initialize the DistributedArgHandler.
 
@@ -31,9 +31,19 @@ class DistributedArgHandler:
         """
         self.location = Path(location)
         self.lock_timeout = lock_timeout
-        self.retry_limit = retry_limit
+        self._retry_limit = retry_limit
         self.scan_limit = scan_limit
         self.location.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def retry_limit(self) -> int:
+        """Get the current retry limit."""
+        return self._retry_limit
+
+    @retry_limit.setter
+    def retry_limit(self, value: int):
+        """Set a new retry limit."""
+        self._retry_limit = value
 
     def put(self, obj: Any, obj_name: str, group_name: str = ""):
         """
@@ -228,6 +238,7 @@ class ModelConfig:
         - Filled by worker if cv=true
         validate_score (float): optional AUC score of model applied to validate substitution (see readme)
         - Filled by worker if validate=true
+        top_features List[str]: list of top features where if extractable
     """
     split_name: str
     pipeline_name: str
@@ -235,6 +246,7 @@ class ModelConfig:
     _pipeline_hyperparameters: Dict[str, Any]
     cv_scores: List[float] = field(default_factory=list, repr=False)
     validate_score: float = field(default=None, repr=False)
+    top_features: List[str] # of len n_extract_features if model allows
     config_hash: str = field(default=None, repr=False)
 
     def __post_init__(self):
@@ -282,98 +294,13 @@ class SplitConfig:
         cv_indexes (List[Tuple[np.ndarray, np.ndarray]]): Contains the splits for cross validation.
         - None iff cv is False
     """
-    split_name: str
-    train_query: str
-    validate_query: str
-    column_order: List[str]
-    cv_indexes: List[Tuple[np.ndarray, np.ndarray]]
-
-def get_data(query: str, schema: Optional[List[str]] = None) -> Union[Tuple[np.ndarray, List[str]], np.ndarray]:
-    """
-    Get data from database using a query that returns run IDs, optionally fitting to a schema.
-    
-    Parameters
-    ----------
-    query : str
-        SQL query that returns a list of run IDs (like those in queries.yaml)
-    schema : Optional[List[str]]
-        Optional list of feature names to fit the returned data to.
-        If not provided, returns both data and the schema.
-    
-    Returns
-    -------
-    If schema provided:
-        np.ndarray: Data matrix with rows matching query runs and columns matching schema
-    If no schema:
-        Tuple[np.ndarray, List[str]]: Data matrix and list of feature names
-    """
-    # Get run IDs from query
-    runs_df = load_dataframe(query)
-    runs = runs_df['run'].tolist()
-    
-    if not runs:
-        return np.array([]) if schema else (np.array([]), [])
-        
-    # Build placeholder list for SQL
-    runs_placeholder = ", ".join(f"'{run}'" for run in runs)
-    
-    # Get genomic features
-    features_query = f"""
-        SELECT r.run, t.taxon_name, g.rpm
-        FROM runs r
-        LEFT JOIN genomic_sequence_rpm g ON r.run = g.run
-        LEFT JOIN taxa t ON g.taxon_id = t.taxon_id
-        WHERE r.run IN ({runs_placeholder})
-    """
-    features_df = load_dataframe(features_query)
-    
-    # Pivot features into matrix
-    if not features_df.empty and 'taxon_name' in features_df.columns:
-        pivot_df = features_df.pivot_table(
-            index='run',
-            columns='taxon_name',
-            values='rpm',
-            aggfunc='mean',
-            fill_value=0
-        )
-    else:
-        return np.array([]) if schema else (np.array([]), [])
-
-    # If schema provided, reindex to match
-    if schema is not None:
-        missing_cols = set(schema) - set(pivot_df.columns)
-        for col in missing_cols:
-            pivot_df[col] = 0
-        pivot_df = pivot_df[schema]
-        return pivot_df.to_numpy()
-    
-    # Otherwise return data and feature names
-    return pivot_df.to_numpy(), pivot_df.columns.tolist()
-
-
-def get_logger(context: str = None):
-    """
-    Retrieve or initialize a logger with the given context.
-    Logs are written to LOGS_DIR/status.log.
-    """
-    global _loggers
-    log_file_name = "status.log"
-    if not os.path.exists(LOGS_DIR):
-        os.makedirs(LOGS_DIR)
-    if context not in _loggers:
-        logger = logging.getLogger(context if context else __name__)
-        logger.setLevel(logging.INFO)
-        # Avoid adding duplicate handlers
-        if log_file_name not in {getattr(handler, 'baseFilename', None) for handler in logger.handlers}:
-            handler = logging.FileHandler(LOGS_DIR / log_file_name)
-            handler.setLevel(logging.INFO)
-            formatter = logging.Formatter(f'%(asctime)s - {context if context else "general"} - %(levelname)s - %(message)s')
-            handler.setFormatter(formatter)
-            logger.addHandler(handler)
-        _loggers[context] = logger
-    return _loggers[context]
-
-# --- MACHINE LEARNING UTILITIES ---
+    split_name: str,
+    schema: List[str],
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: Optional[np.ndarray],
+    y_val: Optional[np.ndarray],
+    cv_indexes: List[np.ndarray],
 
 @dataclass
 class ModelConfig:
@@ -422,30 +349,130 @@ class ModelConfig:
                 f"  Top Features: {list(self.top_k_features.keys())}\n"
                 f")")
 
-def stratified_cv(df: 'pd.DataFrame', seed: int, n_splits: int):
+def get_topK_features(fitted_pipe: Pipeline, k: int) -> List[str]:
     """
-    Generates stratified cross-validation splits based on the 'Condition' column.
+    Hardcoded method that attempts to subjectively extract the top k features from a fitted pipeline.
+    """
+   #TODO: implement sklearn native ability in custom_transformers, etc.
+    raise NotImplementedError()
+
+def prep_search(pipeline_config: dict):
+    """
+    Prepares a pipeline and a hyperparameter grid for a model search.
     
     Args:
-        df (pd.DataFrame): DataFrame containing a 'Condition' column.
-        seed (int): Random seed for reproducibility.
-        n_splits (int): Number of CV splits.
+        pipeline_config (dict): Dictionary containing pipeline steps and configurations.
         
     Returns:
-        list: A list of tuples containing train and test indices.
-        
-    Raises:
-        ValueError: If 'Condition' column is missing.
+        tuple: (Pipeline, List of parameter grids)
     """
-    if 'Condition' not in df.columns:
-        raise ValueError(f"'Condition' column is not in the input DataFrame.")
+    def import_class(module_path: str):
+        module_name, class_name = module_path.rsplit(".", 1)
+        module = import_module(module_name)
+        return getattr(module, class_name)
+
+    step_names = [list(step.keys())[0] for step in pipeline_config['steps']]
+    step_configs_lists = [list(step.values())[0] for step in pipeline_config['steps']]
+    pipeline = Pipeline([(step_name, 'passthrough') for step_name in step_names])
+    param_grids = []
+
+    for step_configs in product(*step_configs_lists):
+        param_grid = {}
+        for step_name, step_config in zip(step_names, step_configs):
+            func = import_class(step_config['function'])
+            args = step_config.get('args', {})
+            param_grid[f"{step_name}"] = [func(**args)]
+            for hp_name, hp_values in step_config.get('hyperparams', {}).items():
+                param_grid[f"{step_name}__{hp_name}"] = hp_values
+        param_grids.append(param_grid)
+
+    return pipeline, param_grids
+
+def get_data(query: str, schema: Optional[List[str]] = None) -> Union[Tuple[np.ndarray, List[str]], np.ndarray]:
+    """
+    Get data from database using a query that returns run IDs, optionally fitting to a schema.
     
-    labels = df['Condition'].values
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-    splits = []
-    for train_idx, test_idx in skf.split(df, labels):
-        splits.append((df.index[train_idx], df.index[test_idx]))
-    return splits
+    Parameters
+    ----------
+    query : str
+        SQL query that returns a list of run IDs (like those in queries.yaml)
+    schema : Optional[List[str]]
+        Optional list of feature names to fit the returned data to.
+        If not provided, returns both data and the schema.
+    
+    Returns
+    -------
+    If schema provided:
+        np.ndarray: Data matrix with rows matching query runs and columns matching schema
+    If no schema:
+        Tuple[np.ndarray, List[str]]: Data matrix and list of feature names
+    """
+    # Todo: make sure encoding is done properly
+
+    # Get run IDs from query
+    runs_df = load_dataframe(query)
+    runs = runs_df['run'].tolist()
+    
+    if not runs:
+        return np.array([]) if schema else (np.array([]), [])
+        
+    # Build placeholder list for SQL
+    runs_placeholder = ", ".join(f"'{run}'" for run in runs)
+    
+    # Get genomic features
+    features_query = f"""
+        SELECT r.run, t.taxon_name, g.rpm
+        FROM runs r
+        LEFT JOIN genomic_sequence_rpm g ON r.run = g.run
+        LEFT JOIN taxa t ON g.taxon_id = t.taxon_id
+        WHERE r.run IN ({runs_placeholder})
+    """
+    features_df = load_dataframe(features_query)
+    
+    # Pivot features into matrix
+    if not features_df.empty and 'taxon_name' in features_df.columns:
+        pivot_df = features_df.pivot_table(
+            index='run',
+            columns='taxon_name',
+            values='rpm',
+            aggfunc='mean',
+            fill_value=0
+        )
+    else:
+        return np.array([]) if schema else (np.array([]), [])
+
+    # If schema provided, reindex to match
+    if schema is not None:
+        missing_cols = set(schema) - set(pivot_df.columns)
+        for col in missing_cols:
+            pivot_df[col] = 0
+        pivot_df = pivot_df[schema]
+        return pivot_df.to_numpy()
+    
+    # Otherwise return data and feature names
+    return pivot_df.to_numpy(), pivot_df.columns.tolist()
+
+def get_logger(context: str = None):
+    """
+    Retrieve or initialize a logger with the given context.
+    Logs are written to LOGS_DIR/status.log.
+    """
+    global _loggers
+    log_file_name = "status.log"
+    if not os.path.exists(LOGS_DIR):
+        os.makedirs(LOGS_DIR)
+    if context not in _loggers:
+        logger = logging.getLogger(context if context else __name__)
+        logger.setLevel(logging.INFO)
+        # Avoid adding duplicate handlers
+        if log_file_name not in {getattr(handler, 'baseFilename', None) for handler in logger.handlers}:
+            handler = logging.FileHandler(LOGS_DIR / log_file_name)
+            handler.setLevel(logging.INFO)
+            formatter = logging.Formatter(f'%(asctime)s - {context if context else "general"} - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+        _loggers[context] = logger
+    return _loggers[context]
 
 def prep_search(pipeline_config: dict):
     """
@@ -502,30 +529,3 @@ def get_all_configurations(grid: list):
             configuration = dict(zip(keys, combination))
             all_configurations.append(configuration)
     return all_configurations
-
-def get_score(y_true, y_pred_proba, trained_classes):
-    """
-    Calculates the weighted AUC score for a multi-class classification problem.
-    
-    Args:
-        y_true (np.array): True labels.
-        y_pred_proba (np.array): Predicted probabilities.
-        trained_classes (list): The classes the model was trained on.
-        
-    Returns:
-        float: The weighted AUC score.
-    """
-    logger = get_logger('utils.py -- get_score')
-    weighted_auc = 0.0
-    total_samples = len(y_true)
-    for i in np.unique(y_true):
-        if i not in trained_classes:
-            logger.warning(f"Class {i} in y_true is not in trained_classes")
-            continue
-        y_true_binary = (y_true == i).astype(int)
-        class_idx = trained_classes.tolist().index(i)
-        y_pred_proba_class = y_pred_proba[:, class_idx]
-        auc = roc_auc_score(y_true_binary, y_pred_proba_class)
-        weight = np.sum(y_true == i) / total_samples
-        weighted_auc += auc * weight
-    return weighted_auc

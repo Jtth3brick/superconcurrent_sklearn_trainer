@@ -19,6 +19,7 @@ For timeout interruption
 """
 class TimeoutError(Exception):
     pass
+
 def handler(signum, frame):
     raise TimeoutError()
 
@@ -81,7 +82,7 @@ class Worker:
             except Exception as e:
                 self.logger.error(f"Error occurred in eval_assemble_save: {str(e)}\n\tconfig={str(model_config)}")
     
-    def train_eval_save(self, model_config: utils.ModelConfig) -> None:
+    def train_eval_save(self, model_config: utils.ModelConfig, extract_features=True, save_model=True) -> None:
         self.logger.info(f"Training model:\n\t{model_config}")
 
         # Check if we should do CV
@@ -89,39 +90,44 @@ class Worker:
             model_config.cv_scores = self.get_cv_scores(model_config)
 
         # train full model
-        X, y = self.split_config.train_data, self.split_config.train_metadata[Y_COL_NAME]
         pipe = model_config.get_empty_pipe()
-        pipe.fit(X.copy(), y.copy())
+        pipe.fit(X_train.copy(), y_train.copy())
 
         # save fitted pipe
-        model_file_path = MODELS_DIR / f"{model_config.config_hash}.model.pkl"
-        with open(model_file_path, "wb") as file:
-            pickle.dump(pipe, file)
+        if save_model:
+            model_file_path = MODELS_DIR / f"{model_config.config_hash}.model.pkl"
+            with open(model_file_path, "wb") as file:
+                pickle.dump(pipe, file)
+        
+        # extract top features
+        if extract_features:
+            model_config.top_k_features = utils.extract_topK_features(pipe)
 
         # Check if we want validate scores
         if self.split_config.validate_data is not None:
-            X, y = self.split_config.validate_data, self.split_config.validate_metadata[Y_COL_NAME]
-            y_pred_proba = pipe.predict_proba(X)
-            model_config.validate_score = utils.get_score(y_true=y, y_pred_proba=y_pred_proba, trained_classes=pipe.classes_)
+            y_pred_proba = pipe.predict_proba(self.split_config.X_val.copy())
+            model_config.validate_score = utils.get_score(y_true=self.split_config.y_val, y_pred_proba=y_pred_proba)
 
         # Save scored utils.ModelConfig
         self.save_queue.put(model_config, obj_name=model_config.config_hash, group_name=model_config.split_name)
     
     def get_cv_scores(self, model_config: utils.ModelConfig) -> List[float]:
-        X, y = self.split_config.train_data, self.split_config.train_metadata[Y_COL_NAME]
+        # X, y = self.split_config.train_data, self.split_config.train_metadata[Y_COL_NAME]
 
-        scores = []
-        for cv_split in self.split_config.cv_indexes:
-            pipe = model_config.get_empty_pipe()
-            cv_train_indices, cv_test_indices = cv_split
+        # scores = []
+        # for cv_split in self.split_config.cv_indexes:
+        #     pipe = model_config.get_empty_pipe()
+        #     cv_train_indices, cv_test_indices = cv_split
 
-            X_train, X_test = X.loc[cv_train_indices], X.loc[cv_test_indices]
-            y_train, y_test = y.loc[cv_train_indices], y.loc[cv_test_indices]
-            pipe.fit(X_train.copy(), y_train.copy())
-            y_pred_proba = pipe.predict_proba(X_test)
-            score = utils.get_score(y_true=y_test, y_pred_proba=y_pred_proba, trained_classes=pipe.classes_)
-            scores.append(score)
-        return scores
+        #     X_train, X_test = X.loc[cv_train_indices], X.loc[cv_test_indices]
+        #     y_train, y_test = y.loc[cv_train_indices], y.loc[cv_test_indices]
+        #     pipe.fit(X_train.copy(), y_train.copy())
+        #     y_pred_proba = pipe.predict_proba(X_test)
+        #     score = utils.get_score(y_true=y_test, y_pred_proba=y_pred_proba, trained_classes=pipe.classes_)
+        #     scores.append(score)
+        # return scores
+        # TODO
+        raise NotImplementedError()
 
     def ensure_split_config(self, model_config: utils.ModelConfig):
         """
@@ -150,6 +156,7 @@ class Worker:
             self.logger.error(f"Failed to load training argument after {self.model_config_queue.retry_limit} attempts. Estimated number of args remaining: {self.model_config_queue.count_pkl_files()}")
             sys.exit()
         return model_config
+
 class Manager:
     """
     Manages the preparation and distribution of model configurations and data splits.
@@ -175,6 +182,8 @@ class Manager:
         self.cv = cv
         self.validate = validate
         self.model_config_queue = get_untrained_model_config_queue(timeout=60*60) # 1 hour timeout for workers
+
+        self.all_train_samples = ... #TODO: use TRAIN_DATA_QUERY on DB_PATH sqlite3 instance to get df
 
     def manage(self):
         """
@@ -249,7 +258,6 @@ class Manager:
         return interlaced_model_configs
 
     def generate_split_config(self, split_name):
-
         # Getting data sets
         if self.validate:
             # validate requires special naming scheme
@@ -257,21 +265,26 @@ class Manager:
             validate_split_name = f"validate_{split_name}"
 
             # load datasets
-            self.logger.info(f"Filtering data on {train_split_name}...")
-            train_metadata, train_data = utils.filter_data(train_split_name)
+            self.logger.info(f"Getting {train_split_name} training data...")
+            X_train, y_train, schema = utils.get_data(all_train_samples, train_split_name)
+            self.logger.info(f"Retrieved {train_split_name} train data with shape {X_train.shape}")
 
-            self.logger.info(f"Filtering validation data on {validate_split_name}...")
-            validate_metadata, validate_data = utils.filter_data(validate_split_name)
+            self.logger.info(f"Getting {validate_split_name} validate data...")
+            X_val, y_val, _ = utils.get_data(all_train_samples, validate_split_name, schema=schema)
+            self.logger.info(f"Retrieved {validate_split_name} validate data with shape {X_val.shape}")
         else:
-            self.logger.info(f"Validation scoring skipped. Filtering data only (split name is {split_name})...")
-            train_metadata, train_data = utils.filter_data(split_name)
+            self.logger.info(f"Validation scoring skipped. Getting training data only (split name is {split_name})...")
+            X_train, y_train, schema = utils.filter_data(split_name)
+            self.logger.info(f"Retrieved {split_name} data with shape {X_train.shape}")
 
             # Indicate that validate should not be done
-            validate_metadata, validate_data = None, None
+            X_val, y_val = None, None
         
         # Get indexes for cv splits if cv was indicated
         if self.cv:
-            cv_indexes = utils.stratified_cv(train_metadata, SEED, N_SPLITS)
+            skf = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=SEED)
+            cv_indexes = [] # TODO, fix
+            raise NotImplementedError()
         else:
             # Indicate CV should not be done
             cv_indexes = None
@@ -279,11 +292,12 @@ class Manager:
         # Create SplitConfig
         split_config = SplitConfig(
             split_name=split_name,
-            train_data=train_data,
-            train_metadata=train_metadata,
-            validate_data=validate_data,
-            validate_metadata=validate_metadata,
-            cv_indexes=cv_indexes
+            schema=schema,
+            X_train=X_train,
+            y_train = y_train,
+            X_val = X_val,
+            y_val = y_val,
+            cv_indexes=cv_indexes,
         )
 
         return split_config

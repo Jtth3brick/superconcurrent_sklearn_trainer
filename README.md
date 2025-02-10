@@ -3,6 +3,17 @@ The Superparallel Sklearn Trainer is a pure-python, distributed hyperparameter s
 
 The object-oriented argument handling and results saving allows for easy addition of attributes for analysis after runtime as well as management of worker tasks.
 
+## SECTION NAME
+# These must be defined in globals.py:
+WORKING_DATA_DIR  # For temporary working files
+RESULTS_DIR      # For storing results
+MODELS_DIR       # For saving trained models
+LOGS_DIR         # For log files
+DATA_DIR         # For raw data storage
+DB_PATH          # Path to SQLite database
+PIPE_CONFIG_PATH # Path to pipeline YAML configs
+
+
 ## For different datasets:
 - Change `utils.get_data()`, which is the data API
 - Change your desired model pipelines in `configs/pipe_configs.yaml`.

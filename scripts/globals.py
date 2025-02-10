@@ -52,5 +52,6 @@ with open(CONFIGS_DIR / 'config.yaml', 'r') as f:
 PIPE_CONFIG_PATH = BASE_DIR / CONFIG['pipe_config_path']
 SEED = CONFIG['seed']
 N_SPLITS = CONFIG['n_splits']
-Y_COL_NAME = CONFIG['y_col_name'] # should be in metadata.csv only
-INDEX_COL = CONFIG['index_col']
+N_EXTRACT_FEATURES = CONFIG['n_extract_features']
+DB_PATH = DATA_DIR / CONFIG['db_name']
+TRAIN_DATA_QUERY = CONFIG['filtered_runs']
