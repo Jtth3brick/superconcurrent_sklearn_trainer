@@ -234,42 +234,11 @@ class SplitConfig:
     """
     split_name: str
     X_train: pd.DataFrame
-    y_train: pd.DataFrame
+    y_train: pd.Series
     X_val: Optional[pd.DataFrame]
-    y_val: Optional[pd.DataFrame]
+    y_val: Optional[pd.Series]
     cv_indexes: List[np.ndarray]
     
-    # Private field for cleaned column names, populated by sanitize_columns()
-    _cleaned_cols: List[str] = field(init=False, default_factory=list, repr=False)
-    
-    @property
-    def cleaned_cols(self) -> List[str]:
-        """Get the cleaned column names"""
-        return self._cleaned_cols
-    
-    def __post_init__(self) -> None:
-        """
-        Sanitize the column names based on the original schema and update the DataFrame attributes.
-        For each column:
-          - Replace non-alphanumeric characters with underscores.
-          - Convert to lower-case.
-          - Prepend with "f_<index>_".
-          - Append the first 4 characters of the SHA-256 hash of the original name.
-        """
-        cleaned = []
-        for i, col in enumerate(self.X_train.columns):
-            # Convert to lowercase and replace non-alphanumeric with underscore
-            clean_name = re.sub(r'[^a-zA-Z0-9]', '_', col.lower())
-            
-            # Generate hash of original name
-            name_hash = hashlib.sha256(col.encode()).hexdigest()[:4]
-            
-            # Create final column name
-            final_name = f"f_{i}_{clean_name}_{name_hash}"
-            cleaned.append(final_name)
-            
-        object.__setattr__(self, '_cleaned_cols', cleaned)
-
 @dataclass
 class ModelConfig:
     """
@@ -292,7 +261,7 @@ class ModelConfig:
     _pipeline_hyperparameters: Dict[str, Any]
 
     # set by worker after fitting
-    model: Optional[Pipeline] = field(default=None, repr=False)
+    model: Optional[Pipeline] = field(default=None, repr=False) # preferrably store fitted models eslewhere 
     cv_scores: List[float] = field(default_factory=list, repr=False)
     validate_score: float = field(default=None, repr=False)
     top_k_features: Optional[Dict[str, float]] = None  # top k features as a dict mapping feature name to importance
@@ -332,7 +301,28 @@ class ModelConfig:
                 f"  Top Features: {list(self.top_k_features.keys()) if self.top_k_features is not None else None}\n"
                 f")")
 
-def extract_topK_features(pipe, k=10, logger=None):
+def get_logger(context: str = None):
+    """
+    Retrieve or initialize a logger with the given context.
+    Logs are written to LOGS_DIR/status.log.
+    """
+    global _loggers
+    if not os.path.exists(LOGS_DIR):
+        os.makedirs(LOGS_DIR)
+    if context not in _loggers:
+        logger = logging.getLogger(context if context else __name__)
+        logger.setLevel(logging.INFO)
+        # Avoid adding duplicate handlers
+        if LOG_NAME not in {getattr(handler, 'baseFilename', None) for handler in logger.handlers}:
+            handler = logging.FileHandler(LOGS_DIR / LOG_NAME)
+            handler.setLevel(logging.INFO)
+            formatter = logging.Formatter(f'%(asctime)s - {context if context else "general"} - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+        _loggers[context] = logger
+    return _loggers[context]
+
+def extract_topK_features(pipe, k=10):
     """
     Extracts top K features from a fitted pipeline based on feature importance or coefficients.
     
@@ -356,11 +346,8 @@ def extract_topK_features(pipe, k=10, logger=None):
         containing up to `k` features. Returns an empty dictionary if the function cannot
         determine feature names or importance scores.
     """
-    if logger is None:
-        logger = type('NullLogger', (), {
-            'debug': lambda *args, **kwargs: None,
-            'info': lambda *args, **kwargs: None
-        })()
+    logger = get_logger("feature_extraction")
+
     logger.debug("Starting extract_topK_features with k=%d", k)
     
     model = None
@@ -463,9 +450,16 @@ def get_score(y_true, y_pred_proba, trained_classes=None):
             
     return roc_auc_score(y_true, y_pred_proba)
 
-def get_data(split, schema=None):
+def get_data(split: str, schema: List[str] = None):
     """
     Retrieve the microbiome dataset for a given split (train or validate).
+    If given schema, creates, deletes, and reorders columns filling with 0.
+    
+    Args:
+        split (str): The split name (e.g., 'train_U1', 'validate_U1')
+        schema (List[str], optional): List of taxon IDs defining the expected column order.
+                                    If provided, ensures output matches this schema.
+    
     Returns:
         X (pd.DataFrame): Feature matrix with taxa readcounts.
         y (pd.Series): Binary labels (0 = Healthy, 1 = UC/CD) for each sample.
@@ -473,27 +467,41 @@ def get_data(split, schema=None):
     # Connect to database
     engine = sqlite3.connect(DB_PATH)
     
-    # Assume `config` is a global dict from the YAML configuration and `engine` is a database connection.
-    cohorts = CONFIG['split_cohorts'][split]  # e.g., list of cohort names for the split
-    # Format cohort list for SQL IN clause
+    # Get cohorts for this split from config
+    cohorts = CONFIG['split_cohorts'][split]
     cohort_list_str = "', '".join(cohorts)
     
-    # SQL query to get all nonzero read counts for the selected runs with taxon names
+    # SQL query to get all nonzero read counts for the selected runs
     query_seq = f""" 
-        SELECT g.run, t.taxon_name AS taxon, g.rpm
+        SELECT g.run, g.taxon_id AS taxon, g.rpm
         FROM genomic_sequence_rpm AS g
-        JOIN selected_runs AS s
+        INNER JOIN selected_runs AS s
           ON g.run = s.run
-        JOIN taxa t
-          ON g.taxon_id = t.taxon_id
         WHERE s.cohort IN ('{cohort_list_str}')
     """
     
     # Read data into pandas DataFrame
     df = pd.read_sql(query_seq, engine)
     
-    # Pivot table to get features (taxa) as columns
+    # Pivot table to get features (taxa) as columns and make sure columns are string type
     X = df.pivot(index='run', columns='taxon', values='rpm').fillna(0)
+    X.columns = [str(col) for col in X.columns]
+    
+    # If schema is provided, ensure X matches it exactly
+    if schema is not None:
+        # Convert schema to strings to match column names from pivot
+        schema = [str(taxon) for taxon in schema]
+        
+        # Create DataFrame with all schema columns
+        missing_data = pd.DataFrame(0, 
+                                  index=X.index, 
+                                  columns=list(set(schema) - set(X.columns)))
+        
+        # Combine existing and missing columns
+        X = pd.concat([X, missing_data], axis=1)
+        
+        # Keep only schema columns in correct order
+        X = X[schema]
     
     # Get labels for the runs
     query_labels = f"""
@@ -507,30 +515,10 @@ def get_data(split, schema=None):
     # Ensure X and y have same indices in same order
     y = y.reindex(X.index)
     
+    # Close database connection
     engine.close()
-    return X, y
     
-def get_logger(context: str = None):
-    """
-    Retrieve or initialize a logger with the given context.
-    Logs are written to LOGS_DIR/status.log.
-    """
-    global _loggers
-    log_file_name = "status.log"
-    if not os.path.exists(LOGS_DIR):
-        os.makedirs(LOGS_DIR)
-    if context not in _loggers:
-        logger = logging.getLogger(context if context else __name__)
-        logger.setLevel(logging.INFO)
-        # Avoid adding duplicate handlers
-        if log_file_name not in {getattr(handler, 'baseFilename', None) for handler in logger.handlers}:
-            handler = logging.FileHandler(LOGS_DIR / log_file_name)
-            handler.setLevel(logging.INFO)
-            formatter = logging.Formatter(f'%(asctime)s - {context if context else "general"} - %(levelname)s - %(message)s')
-            handler.setFormatter(formatter)
-            logger.addHandler(handler)
-        _loggers[context] = logger
-    return _loggers[context]
+    return X, y
 
 def prep_search(pipeline_config: dict):
     """

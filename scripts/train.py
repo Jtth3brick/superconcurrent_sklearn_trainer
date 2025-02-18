@@ -14,9 +14,6 @@ MODEL_CONFIGS_PATH = WORKING_DATA_DIR / 'model_config_queue'
 
 random.seed(SEED)
 
-"""
-For timeout interruption
-"""
 class TimeoutError(Exception):
     pass
 
@@ -86,13 +83,9 @@ class Worker:
         self.logger.info(f"Training model:\n\t{model_config}")
 
         # Convert to clean names for model training
-        col_map = {cleaned_name: orig_name for (cleaned_name, orig_name) in zip(self.split_config.X_train.columns, self.split_config.cleaned_cols)}
-        X_train, y_train = self.split_config.X_train.copy(), self.split_config.y_train
-        X_train.columns = self.split_config.cleaned_cols
+        X_train, y_train = self.split_config.X_train.copy(), self.split_config.y_train.copy()
         if self.split_config.X_val is not None:
-            X_val = self.split_config.X_val.copy()
-            X_val.columns = self.split_config.cleaned_cols
-            y_val = self.split_config.y_val
+            X_val, y_val = self.split_config.X_val.copy(), self.split_config.y_val.copy()
         else:
             X_val, y_val = None, None
 
@@ -110,16 +103,15 @@ class Worker:
             with open(model_file_path, "wb") as file:
                 pickle.dump(pipe, file)
         
-        # extract top features and map back to original names
+        # extract top features
         if extract_features:
-            top_k_features = utils.extract_topK_features(pipe)
-            model_config.top_k_features = {col_map[k]: v for k, v in top_k_features.items()}
+            model_config.top_k_features = utils.extract_topK_features(pipe)
             self.logger.info(f"Top features extracted: {list(model_config.top_k_features.keys())}")
 
         # Check if we want validate scores
         if self.split_config.X_val is not None:
             y_pred_proba = pipe.predict_proba(self.split_config.X_val.copy())
-            model_config.validate_score = utils.get_score(y_true=self.split_config.y_val, y_pred_proba=y_pred_proba)
+            model_config.validate_score = utils.get_score(y_true=self.split_config.y_val.copy(), y_pred_proba=y_pred_proba)
 
         # Save scored utils.ModelConfig
         self.save_queue.put(model_config, obj_name=model_config.config_hash, group_name=model_config.split_name)
@@ -128,12 +120,11 @@ class Worker:
         scores = []
         for cv_train_indices, cv_test_indices in self.split_config.cv_indexes:
             pipe = model_config.get_empty_pipe()
-            X_train, y_train = self.split_config.X_train.copy(), self.split_config.y_train
-            X_train.columns = self.split_config.cleaned_cols
-            X_train_fold = X_train[cv_train_indices]
-            y_train_fold = y_train[cv_train_indices]
-            X_val_fold = X_train[cv_test_indices] 
-            y_val_fold = y_train[cv_test_indices]
+            X_train, y_train = self.split_config.X_train.copy(), self.split_config.y_train.copy()
+            X_train_fold = X_train.loc[cv_train_indices]
+            y_train_fold = y_train.loc[cv_train_indices]
+            X_val_fold = X_train.loc[cv_test_indices] 
+            y_val_fold = y_train.loc[cv_test_indices]
             pipe.fit(X_train_fold.copy(), y_train_fold.copy())
             y_pred_proba = pipe.predict_proba(X_val_fold)
             score = utils.get_score(y_true=y_val_fold, y_pred_proba=y_pred_proba, trained_classes=pipe.classes_)
@@ -167,7 +158,6 @@ class Worker:
             self.logger.error(f"Failed to load training argument after {self.model_config_queue.retry_limit} attempts. Estimated number of args remaining: {self.model_config_queue.count_pkl_files()}")
             sys.exit()
         return model_config
-
 class Manager:
     """
     Manages the preparation and distribution of model configurations and data splits.
@@ -290,7 +280,14 @@ class Manager:
         # Get indexes for cv splits if cv was indicated
         if self.cv:
             skf = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=SEED)
-            cv_indexes = list(skf.split(X_train, y_train))
+            # Convert DataFrame indices to run indices before storing
+            run_indices = list(X_train.index)
+            cv_indexes = []
+            for train_idx, test_idx in skf.split(X_train, y_train):
+                # Convert DataFrame indices to run names
+                train_runs = [run_indices[i] for i in train_idx]
+                test_runs = [run_indices[i] for i in test_idx]
+                cv_indexes.append((train_runs, test_runs))
         else:
             # Indicate CV should not be done
             cv_indexes = None
