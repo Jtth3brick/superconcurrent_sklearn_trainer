@@ -327,7 +327,7 @@ def extract_topK_features(pipe, k=10):
     Extracts top K features from a fitted pipeline based on feature importance or coefficients.
     
     This function assumes:
-      1. The final step of your pipeline is named "model".
+      1. The final step of your pipeline is named "Model".
       2. The final estimator has either a `feature_importances_` or `coef_` attribute.
       3. You have preserved feature names (for example, by fitting a pandas DataFrame
          or implementing `get_feature_names_out` in earlier steps).
@@ -354,8 +354,8 @@ def extract_topK_features(pipe, k=10):
     feature_names = None
 
     # Attempt to locate the final model (assuming its step name is 'model')
-    if "model" in pipe.named_steps:
-        model = pipe.named_steps["model"]
+    if "Model" in pipe.named_steps:
+        model = pipe.named_steps["Model"]
         logger.debug("Found final model in pipeline: %s", type(model).__name__)
         
         # Attempt to retrieve feature names directly from pipeline
@@ -371,7 +371,7 @@ def extract_topK_features(pipe, k=10):
                                  name, feature_names[:5])
                     break
     else:
-        logger.debug("No final step named 'model' found. Returning empty dict.")
+        logger.debug("No final step named 'Model' found. Returning empty dict.")
         return {}
 
     # If we still don't have a model or feature names, return empty
@@ -517,6 +517,10 @@ def get_data(split: str, schema: List[str] = None):
     
     # Close database connection
     engine.close()
+
+    # Ensure all values in X are float and y are int
+    X = X.astype(float)
+    y = y.astype(int)
     
     return X, y
 

@@ -45,7 +45,7 @@ MODELS_DIR = BASE_DIR / 'models'
 RESULTS_DIR = BASE_DIR / 'results'
 SCORES_DIR = RESULTS_DIR / 'scored_model_configs'
 WORKING_DATA_DIR = DATA_DIR / 'working'
-SCORES_SAVE_QUEUE_PATH = WORKING_DATA_DIR / 'scores_queue'
+SCORES_SAVE_QUEUE_PATH = RESULTS_DIR / 'scores_queue'
 
 # Load configuration as a constant
 with open(CONFIGS_DIR / 'config.yaml', 'r') as f:
