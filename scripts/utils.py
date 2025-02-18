@@ -332,7 +332,7 @@ class ModelConfig:
                 f"  Top Features: {list(self.top_k_features.keys()) if self.top_k_features is not None else None}\n"
                 f")")
 
-def extract_topK_features(pipe, k=10):
+def extract_topK_features(pipe, k=10, logger=None):
     """
     Extracts top K features from a fitted pipeline based on feature importance or coefficients.
     
@@ -356,6 +356,11 @@ def extract_topK_features(pipe, k=10):
         containing up to `k` features. Returns an empty dictionary if the function cannot
         determine feature names or importance scores.
     """
+    if logger is None:
+        logger = type('NullLogger', (), {
+            'debug': lambda *args, **kwargs: None,
+            'info': lambda *args, **kwargs: None
+        })()
     logger.debug("Starting extract_topK_features with k=%d", k)
     
     model = None
@@ -462,7 +467,7 @@ def get_data(split, schema=None):
     """
     Retrieve the microbiome dataset for a given split (train or validate).
     Returns:
-        X (pd.DataFrame): Feature matrix with taxa readcounts and patient info (age, gender).
+        X (pd.DataFrame): Feature matrix with taxa readcounts.
         y (pd.Series): Binary labels (0 = Healthy, 1 = UC/CD) for each sample.
     """
     # Connect to database
@@ -473,72 +478,38 @@ def get_data(split, schema=None):
     # Format cohort list for SQL IN clause
     cohort_list_str = "', '".join(cohorts)
     
-    # SQL query to get all runs for the desired cohorts, along with patient metadata (age, gender, condition)
-    query_runs = f"""
-        WITH filtered_cohort_runs AS (
-            SELECT run
-            FROM filtered_runs
-            WHERE cohort IN ('{cohort_list_str}')
-        )
-        SELECT 
-            f.run,
-            CAST(p.age AS FLOAT) AS age,
-            CASE WHEN p.gender = 'Male' THEN 0
-                 WHEN p.gender = 'Female' THEN 1
-                 ELSE NULL END AS gender,
-            CASE WHEN q.condition = 'Healthy' THEN 0
-                 ELSE 1 END AS condition
-        FROM filtered_cohort_runs f
-        JOIN runs r
-          ON f.run = r.run
-        JOIN cleaned_patients p
-          ON r.patient_id = p.patient_id
-        JOIN patients q
-          ON r.patient_id = q.patient_id
-    """
-    run_meta_df = pd.read_sql(query_runs, engine)
-    
-    # Extract the list of run IDs to filter the sequence data
-    run_ids = tuple(run_meta_df['run'].tolist())
-    if not run_ids:
-        # No runs found for the given split
-        return pd.DataFrame(), pd.Series(dtype=int)
-
     # SQL query to get all nonzero read counts for the selected runs with taxon names
     query_seq = f""" 
         SELECT g.run, t.taxon_name AS taxon, g.rpm
         FROM genomic_sequence_rpm AS g
-        JOIN filtered_runs AS f 
-          ON g.run = f.run
+        JOIN selected_runs AS s
+          ON g.run = s.run
         JOIN taxa t
           ON g.taxon_id = t.taxon_id
-        WHERE f.cohort IN ('{cohort_list_str}')
+        WHERE s.cohort IN ('{cohort_list_str}')
     """
-    # Read sequence data and create feature matrix
-    sequence_df = pd.read_sql(query_seq, engine)
-    sequence_matrix = sequence_df.pivot_table(index='run', columns='taxon', values='rpm', fill_value=0)
-
-    # Set index on metadata once
-    run_meta_df.set_index('run', inplace=True)
-
-    # Merge sequence data with metadata features
-    X = sequence_matrix.merge(run_meta_df[['age', 'gender', 'condition']], 
-                            left_index=True,
-                            right_index=True,
-                            how='left')
-
-    # Extract labels
-    y = pd.Series(data=X.pop('condition').values,
-                 index=X.index, 
-                 name='condition')
-
-    # Apply schema if provided
-    if schema is not None:
-        missing_cols = set(schema) - set(X.columns)
-        X = X.reindex(columns=schema, fill_value=0)
-
+    
+    # Read data into pandas DataFrame
+    df = pd.read_sql(query_seq, engine)
+    
+    # Pivot table to get features (taxa) as columns
+    X = df.pivot(index='run', columns='taxon', values='rpm').fillna(0)
+    
+    # Get labels for the runs
+    query_labels = f"""
+        SELECT run, 
+               CASE WHEN condition = 'Healthy' THEN 0 ELSE 1 END as label
+        FROM selected_runs
+        WHERE cohort IN ('{cohort_list_str}')
+    """
+    y = pd.read_sql(query_labels, engine).set_index('run')['label']
+    
+    # Ensure X and y have same indices in same order
+    y = y.reindex(X.index)
+    
+    engine.close()
     return X, y
-
+    
 def get_logger(context: str = None):
     """
     Retrieve or initialize a logger with the given context.

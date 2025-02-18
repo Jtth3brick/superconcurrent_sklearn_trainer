@@ -4,7 +4,6 @@ n_extract_features: 10
 pipe_config_path: 'configs/pipe_configs.yaml'
 db_name: 'ibd_microbiome.sqlite3'
 
-
 split_cohorts:
   train_U1: ['USA_hmbp', 'USA_qiita', 'USA_umass']
   validate_U1: ['USA_prism']
