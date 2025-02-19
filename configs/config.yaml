@@ -1,283 +1,54 @@
-pipe_config_path: 'configs/pipe_configs.yaml'
-clean_metadata_path: 'data/metadata.csv'
-clean_data_path: 'data/data.csv'
-
-seed: 2
+seed: 88
 n_splits: 5
-config_hash_col: 'Config Hash'
-index_col: 'Run' # Should be common index (equal ordering as well) between data.csv and metadata.csv
-y_col_name: 'Condition' # Should be in metadata.csv
+n_extract_features: 10
+pipe_config_path: 'configs/pipe_configs.yaml'
+db_name: 'ibd_microbiome.sqlite3'
+log_name: "status.log"
 
-all_train_data:
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
+split_cohorts:
+  train_U1: ['USA_hmbp', 'USA_qiita', 'USA_umass']
+  validate_U1: ['USA_prism']
 
-train_U1: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['USA_hmbp', "USA_qiita", 'USA_umass']
+  train_U2: ['USA_prism', 'USA_qiita', 'USA_umass']
+  validate_U2: ['USA_hmbp']
 
-validate_U1: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['USA_prism']
+  train_A1: ['USA_hmbp', 'China_jia', 'Germany_elinav']
+  validate_A1: ['Ireland_hill']
 
-train_U2: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['USA_prism', "USA_qiita", 'USA_umass']
+  train_A2: ['USA_hmbp', 'Ireland_hill', 'Germany_elinav']
+  validate_A2: ['China_jia']
+  
+  train_B1: ['USA_hmbp', 'China_jia', 'Israel_elinav']
+  validate_B1: ['Ireland_hill']
 
-validate_U2: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['USA_hmbp']
+  train_B2: ['Ireland_hill', 'USA_hmbp', 'Israel_elinav']
+  validate_B2: ['China_jia']
 
-train_A1: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['USA_hmbp', 'China_jia', 'Germany_elinav']
+  train_C1: ['USA_hmbp', 'Germany_elinav', 'Ireland_hill'] 
+  validate_C1: ['Israel_elinav']
 
-validate_A1: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['Ireland_hill']
+  train_C2: ['Ireland_hill', 'USA_hmbp', 'Israel_elinav']
+  validate_C2: ['Germany_elinav']
 
-train_A2: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['USA_hmbp', 'Ireland_hill', 'Germany_elinav']
+  train_D1: ['USA_hmbp', 'Germany_elinav', 'China_jia']
+  validate_D1: ['Israel_elinav']
 
-validate_A2: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: [China_jia]
+  train_D2: ['USA_hmbp', 'China_jia', 'Israel_elinav']
+  validate_D2: ['Germany_elinav']
 
-train_B1: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['USA_hmbp', 'China_jia', 'Israel_elinav']
+  train_E1: ['Ireland_hill', 'China_jia', 'Germany_elinav']
+  validate_E1: ['Israel_elinav']
 
-validate_B1: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['Ireland_hill']
+  train_E2: ['Ireland_hill', 'Israel_elinav', 'Germany_elinav']
+  validate_E2: ['China_jia']
 
-train_B2: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['Ireland_hill', 'USA_hmbp', 'Israel_elinav']
+  train_F1: ['Ireland_hill', 'China_jia', 'Germany_elinav']
+  validate_F1: ['USA_hmbp']
+  
+  train_F2: ['Ireland_hill', 'Israel_elinav', 'Germany_elinav']
+  validate_F2: ['USA_prism']
 
-validate_B2: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: [China_jia]
-
-train_C1: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['USA_hmbp', 'Germany_elinav', 'Ireland_hill']
-
-validate_C1: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['Israel_elinav']
-
-train_C2: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['Ireland_hill', 'USA_hmbp', 'Israel_elinav']
-
-validate_C2: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['Germany_elinav']
-
-train_D1: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['USA_hmbp', 'Germany_elinav', 'China_jia']
-
-validate_D1: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['Israel_elinav']
-
-train_D2: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['USA_hmbp', 'Germany_elinav', 'Israel_elinav']
-
-validate_D2: #
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['Germany_elinav']
-
-evaluate_israel:
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['Israel_elinav']
-
-evaluate_germany:
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['Germany_elinav']
-
-evaluate_china:
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['China_jia']
-
-evaluate_ireland:
-  include_intervention: false
-  include_remission: false
-  include_antibiotics: false
-  include_surgery: false
-  include_children: false
-  combine_uc_and_cd: true
-  include_same_patient_samples: false
-  config:
-    Cohort: ['Ireland_hill']
+  evaluate_israel: ['Israel_elinav']
+  evaluate_germany: ['Germany_elinav']
+  evaluate_china: ['China_jia']
+  evaluate_ireland: ['Ireland_hill']

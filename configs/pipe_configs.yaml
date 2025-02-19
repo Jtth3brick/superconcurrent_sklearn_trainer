@@ -1,9 +1,5 @@
 lasso:
   steps: 
-  - drop_null_cols:
-    - function: "custom_transformers.ZeroColumnRemover"
-      args: {}
-      hyperparams: {}
   - Preselection:
     - function: "custom_transformers.ThresholdApplier"
       args: {}
@@ -39,10 +35,6 @@ lasso:
 
 ridge:
   steps: 
-  - drop_null_cols:
-    - function: "custom_transformers.ZeroColumnRemover"
-      args: {}
-      hyperparams: {}
   - Preselection:
     - function: "custom_transformers.ThresholdApplier"
       args: {}
@@ -78,10 +70,6 @@ ridge:
 
 enet:
   steps: 
-    - drop_null_cols:
-      - function: "custom_transformers.ZeroColumnRemover"
-        args: {}
-        hyperparams: {}
     - Preselection:
       - function: "custom_transformers.ThresholdApplier"
         args: {}
@@ -96,7 +84,6 @@ enet:
       - function: "custom_transformers.LassoFeatureSelector"
         args: {}
         hyperparams:
-  
           alpha: [1, 4, 64]
           threshold: [0.00001, 0.001, 0.1]
     - Normalization:
@@ -119,10 +106,6 @@ enet:
 
 svc:
   steps: 
-  - drop_null_cols:
-    - function: "custom_transformers.ZeroColumnRemover"
-      args: {}
-      hyperparams: {}
   - Preselection:
     - function: "custom_transformers.ThresholdApplier"
       args: {}
@@ -156,10 +139,6 @@ svc:
 
 xgb:
   steps: 
-  - drop_null_cols:
-    - function: "custom_transformers.ZeroColumnRemover"
-      args: {}
-      hyperparams: {}
   - Preselection:
     - function: "custom_transformers.ThresholdApplier"
       args: {}
@@ -187,10 +166,6 @@ xgb:
 
 rf:
   steps: 
-  - drop_null_cols:
-    - function: "custom_transformers.ZeroColumnRemover"
-      args: {}
-      hyperparams: {}
   - Preselection:
     - function: "custom_transformers.ThresholdApplier"
       args: {}
@@ -224,10 +199,6 @@ rf:
   
 nn:
   steps: 
-  - drop_null_cols:
-    - function: "custom_transformers.ZeroColumnRemover"
-      args: {}
-      hyperparams: {}
   - Preselection:
     - function: "custom_transformers.ThresholdApplier"
       args: {}

@@ -14,11 +14,9 @@ MODEL_CONFIGS_PATH = WORKING_DATA_DIR / 'model_config_queue'
 
 random.seed(SEED)
 
-"""
-For timeout interruption
-"""
 class TimeoutError(Exception):
     pass
+
 def handler(signum, frame):
     raise TimeoutError()
 
@@ -71,6 +69,7 @@ class Worker:
             # Start a timer. If the function does not complete within 60 minutes, 
             # it will raise a TimeoutError skipping that hyperparameter configuration for all remaining batches.
             try:
+                signal.signal(signal.SIGALRM, handler)
                 signal.alarm(MAX_TRAIN_TIME) # Skip hyperparam config after MAX_TRAIN_TIME
                 self.train_eval_save(model_config)
                 # Disable the alarm
@@ -81,45 +80,55 @@ class Worker:
             except Exception as e:
                 self.logger.error(f"Error occurred in eval_assemble_save: {str(e)}\n\tconfig={str(model_config)}")
     
-    def train_eval_save(self, model_config: utils.ModelConfig) -> None:
+    def train_eval_save(self, model_config: utils.ModelConfig, extract_features=True, save_model=True) -> None:
         self.logger.info(f"Training model:\n\t{model_config}")
+
+        # Convert to clean names for model training
+        X_train, y_train = self.split_config.X_train.copy(), self.split_config.y_train.copy()
+        if self.split_config.X_val is not None:
+            X_val, y_val = self.split_config.X_val.copy(), self.split_config.y_val.copy()
+        else:
+            X_val, y_val = None, None
 
         # Check if we should do CV
         if self.split_config.cv_indexes: 
             model_config.cv_scores = self.get_cv_scores(model_config)
 
         # train full model
-        X, y = self.split_config.train_data, self.split_config.train_metadata[Y_COL_NAME]
         pipe = model_config.get_empty_pipe()
-        pipe.fit(X.copy(), y.copy())
+        pipe.fit(X_train.copy(), y_train.copy())
 
         # save fitted pipe
-        model_file_path = MODELS_DIR / f"{model_config.config_hash}.model.pkl"
-        with open(model_file_path, "wb") as file:
-            pickle.dump(pipe, file)
+        if save_model:
+            model_file_path = MODELS_DIR / f"{model_config.config_hash}.model.pkl"
+            with open(model_file_path, "wb") as file:
+                pickle.dump(pipe, file)
+        
+        # extract top features
+        if extract_features:
+            model_config.top_k_features = utils.extract_topK_features(pipe)
+            self.logger.info(f"Top features extracted: {list(model_config.top_k_features.keys())}")
 
         # Check if we want validate scores
-        if self.split_config.validate_data is not None:
-            X, y = self.split_config.validate_data, self.split_config.validate_metadata[Y_COL_NAME]
-            y_pred_proba = pipe.predict_proba(X)
-            model_config.validate_score = utils.get_score(y_true=y, y_pred_proba=y_pred_proba, trained_classes=pipe.classes_)
+        if self.split_config.X_val is not None:
+            y_pred_proba = pipe.predict_proba(self.split_config.X_val.copy())
+            model_config.validate_score = utils.get_score(y_true=self.split_config.y_val.copy(), y_pred_proba=y_pred_proba)
 
         # Save scored utils.ModelConfig
         self.save_queue.put(model_config, obj_name=model_config.config_hash, group_name=model_config.split_name)
     
     def get_cv_scores(self, model_config: utils.ModelConfig) -> List[float]:
-        X, y = self.split_config.train_data, self.split_config.train_metadata[Y_COL_NAME]
-
         scores = []
-        for cv_split in self.split_config.cv_indexes:
+        for cv_train_indices, cv_test_indices in self.split_config.cv_indexes:
             pipe = model_config.get_empty_pipe()
-            cv_train_indices, cv_test_indices = cv_split
-
-            X_train, X_test = X.loc[cv_train_indices], X.loc[cv_test_indices]
-            y_train, y_test = y.loc[cv_train_indices], y.loc[cv_test_indices]
-            pipe.fit(X_train.copy(), y_train.copy())
-            y_pred_proba = pipe.predict_proba(X_test)
-            score = utils.get_score(y_true=y_test, y_pred_proba=y_pred_proba, trained_classes=pipe.classes_)
+            X_train, y_train = self.split_config.X_train.copy(), self.split_config.y_train.copy()
+            X_train_fold = X_train.loc[cv_train_indices]
+            y_train_fold = y_train.loc[cv_train_indices]
+            X_val_fold = X_train.loc[cv_test_indices] 
+            y_val_fold = y_train.loc[cv_test_indices]
+            pipe.fit(X_train_fold.copy(), y_train_fold.copy())
+            y_pred_proba = pipe.predict_proba(X_val_fold)
+            score = utils.get_score(y_true=y_val_fold, y_pred_proba=y_pred_proba, trained_classes=pipe.classes_)
             scores.append(score)
         return scores
 
@@ -213,7 +222,6 @@ class Manager:
         Returns:
             list: A list of interlaced utils.ModelConfig instances ready for model training.
         """
-
         # Load pipeline configurations
         self.logger.info("Loading pipeline configurations.")
         with open(PIPE_CONFIG_PATH, 'r') as f:
@@ -235,7 +243,6 @@ class Manager:
                 _pipeline_struct=pipe_struct,
                 _pipeline_hyperparameters=pipe_hyperparams,
                 cv_scores=[],
-                config_hash=None
             )
             for pipe_hyperparams in pipe_hyperparams_lst]
 
@@ -249,7 +256,6 @@ class Manager:
         return interlaced_model_configs
 
     def generate_split_config(self, split_name):
-
         # Getting data sets
         if self.validate:
             # validate requires special naming scheme
@@ -257,37 +263,49 @@ class Manager:
             validate_split_name = f"validate_{split_name}"
 
             # load datasets
-            self.logger.info(f"Filtering data on {train_split_name}...")
-            train_metadata, train_data = utils.filter_data(train_split_name)
+            self.logger.info(f"Getting {train_split_name} training data...")
+            X_train, y_train = utils.get_data(train_split_name)
+            self.logger.info(f"Retrieved {train_split_name} train data with shape {X_train.shape}")
 
-            self.logger.info(f"Filtering validation data on {validate_split_name}...")
-            validate_metadata, validate_data = utils.filter_data(validate_split_name)
+            self.logger.info(f"Getting {validate_split_name} validate data...")
+            X_val, y_val = utils.get_data(validate_split_name, schema=list(X_train.columns))
+            self.logger.info(f"Retrieved {validate_split_name} validate data with shape {X_val.shape}")
         else:
-            self.logger.info(f"Validation scoring skipped. Filtering data only (split name is {split_name})...")
-            train_metadata, train_data = utils.filter_data(split_name)
+            self.logger.info(f"Validation scoring skipped. Getting training data only (split name is {split_name})...")
+            X_train, y_train = utils.get_data(split_name)
+            self.logger.info(f"Retrieved {split_name} data with shape {X_train.shape}")
 
             # Indicate that validate should not be done
-            validate_metadata, validate_data = None, None
+            X_val, y_val = None, None
         
         # Get indexes for cv splits if cv was indicated
         if self.cv:
-            cv_indexes = utils.stratified_cv(train_metadata, SEED, N_SPLITS)
+            skf = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=SEED)
+            # Convert DataFrame indices to run indices before storing
+            run_indices = list(X_train.index)
+            cv_indexes = []
+            for train_idx, test_idx in skf.split(X_train, y_train):
+                # Convert DataFrame indices to run names
+                train_runs = [run_indices[i] for i in train_idx]
+                test_runs = [run_indices[i] for i in test_idx]
+                cv_indexes.append((train_runs, test_runs))
         else:
             # Indicate CV should not be done
             cv_indexes = None
 
         # Create SplitConfig
-        split_config = SplitConfig(
+        split_config = utils.SplitConfig(
             split_name=split_name,
-            train_data=train_data,
-            train_metadata=train_metadata,
-            validate_data=validate_data,
-            validate_metadata=validate_metadata,
+            X_train=X_train,
+            y_train=y_train,
+            X_val=X_val,
+            y_val=y_val,
             cv_indexes=cv_indexes
         )
 
         return split_config
     
+    @staticmethod
     def prep_directories():
         # Delete model arg queue if it exists
         if MODEL_CONFIGS_PATH.exists():
@@ -301,11 +319,6 @@ class Manager:
         for dir_path in [RESULTS_DIR, MODELS_DIR, WORKING_DATA_DIR, LOGS_DIR]:
             if not os.path.exists(dir_path):
                 os.makedirs(dir_path)
-
-        # Unzip data.csv
-        zip_data_path = DATA_DIR / 'data.csv.zip'
-        with zipfile.ZipFile(zip_data_path, 'r') as zip_ref:
-            zip_ref.extractall(DATA_DIR)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Script to manage or work on machine learning pipelines.")

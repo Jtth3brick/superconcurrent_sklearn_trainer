@@ -8,4 +8,4 @@
 
 PYTHON=$(which python)
 
-${PYTHON} train.py "manage" --cv=true --validate=true --pipeline_names "lasso" "ridge" "enet" "svc" "xgb" "rf" "nn" --split_names "U1" "U2" "A1" "A2" "B1" "B2" "C1" "C2" "D1" "D2"
+${PYTHON} train.py "manage" --cv=true --validate=true --pipeline_names "lasso" "ridge" "enet" "svc" "xgb" "rf" "nn" --split_names "U1" "U2" "A1" "A2" "B1" "B2" "C1" "C2" "D1" "D2" "E1" "E2" "F1" "F2"

@@ -1,16 +1,22 @@
 # Superconcurrent Sklearn Trainer
-The Superparallel Sklearn Trainer is a pure-python, distributed training framework that requires a shared file system for operation. It features yaml-based hyperparameter setup and a manager that sets up a passive worker arguments structure and handles cleanup operations that allows for flexible startup and rerun of worker processes as needed. Drawing inspiration from the MapReduce approach, this trainer emphasizes readability, customization, and persistent execution, making massive hyperparameter search exploration more manageable and transparent.
+The Superparallel Sklearn Trainer is a pure-python, distributed hyperparameter search program that requires a shared file system for operation. It features yaml-based hyperparameter setup and a manager that sets up a passive worker queue and handles cleanup operations that allow for flexible startup and rerun of worker processes as needed.
 
-The object-oriented argument handling and results saving allows for easy addition of attributes for analysis after runtime in a notebook environment.
+The object-oriented argument handling and results saving allows for easy addition of attributes for analysis after runtime as well as management of worker tasks.
+
+## SECTION NAME
+# These must be defined in globals.py:
+WORKING_DATA_DIR  # For temporary working files
+RESULTS_DIR      # For storing results
+MODELS_DIR       # For saving trained models
+LOGS_DIR         # For log files
+DATA_DIR         # For raw data storage
+DB_PATH          # Path to SQLite database
+PIPE_CONFIG_PATH # Path to pipeline YAML configs
+
 
 ## For different datasets:
-- Replace data and metadata files in `data` directory.
-- Change filter function in `scripts/utils.py` and filter configurations in `configs/config.yaml` to match your filtering use case.
-- Change any process calls to match any new/changed pipelines and split filter configurations
-    - This is currently set up for two class, but could be multiclass by simply adjusting pipe_configurations and the y_col arguments.
-    - Main changes will be in train.py manager call.
+- Change `utils.get_data()`, which is the data API
 - Change your desired model pipelines in `configs/pipe_configs.yaml`.
-- 'Condition' and 'Run' are used to target the y-col in metadata and indexing in the two datasets. New application should change these target columns in `configs/config.yaml`.
 
 ## Currently storage intensive
 - If this is an issue, the model doesn't need to be saved. Models can be recreated from their ModelConfig objects given a split arg at any time! Disable model saving in `scripts/train.Worker.train_eval_save()`. Note: random processes may need seeding input in `configs/pipe_configs.yaml` for perfect reproducability.
@@ -22,15 +28,14 @@ The object-oriented argument handling and results saving allows for easy additio
 - Activate your Conda environment.
 - Navigate to the `scripts` directory.
 - If you're running on Berkeley's Savio, there is good documentation for conda [here](https://docs-research-it.berkeley.edu/services/high-performance-computing/user-guide/software/using-software/using-python-savio/), or, for an exact replication of the environment use `req.txt`.
-- If you're not using Berkeley's Savio, `req.txt` is not guaranteed to work, but that and/or environment.yaml should suffice.
-- In short, we're going to be making a python 3.11 conda environment, installing mamba as our package manager, and then installing all of the packages needed in `scripts/globals.py`, mainly being `scikit-learn`, `py-xgboost`, `filelock`, and `pyyaml` with mamba.
+- In short, we're going to be making a python 3.11 conda environment, installing mamba as our package manager, and then installing all of the packages needed in `scripts/globals.py`, mainly being `scikit-learn`, `py-xgboost`, `sqlite3`, `filelock`, and `pyyaml` with mamba.
 
 ### Preparing Training (train.py Manager)
-- Edit the `train_manager.sh` script to match your `split_names` as defined in `configs/config.yaml`. These are your data splits for training. Note the naming convention in train.py inputs if you'd like to evaluate during runtime with `validate=true`.
-- Execute the script using `sbatch train_manager.sh` or an equivalent bash command to set up the model arguments queue and pre-filter the training data for workers.
+- Edit the `train_manager.sh` script to match your `split_names` as defined in `configs/config.yaml`. These are your data splits for training. Note the naming convention in train.py inputs if you'd like to evaluate during runtime with `validate=true`. Simply ignoring splits and training on all data is an option as well.
+- Execute the script using `sbatch train_manager.sh` or an equivalent bash command to set up the model arguments queue and pre-filter the training data for workers. See arghandler in trainer or .sh scripts for more info
     - **Hint:** Workers can be initiated as soon as there are enough `ModelConfig` objects in the queue. You will receive a log notification when the manager starts adding these arguments. It's theoretically possible too many workers could pull args faster than the manager can put them in.
 - **Hint:** You can monitor the completion of all training steps in `status.log` with `tail -f ../logs/status.log`.
-- **Note:** The order that arguments are added to the queue matters in the context of SplitConfig context switches. Workers store then drop their train data, and will be held up by i/o if they consistently need to read in new train data. See `train.Worker.ensure_split_config()` for more info.
+- **Note:** The order that arguments are added to the queue matters in the context of SplitConfig context switches (for multiple splits that are costly to switch in and out of memory). Workers store then drop their train data, and will be held up by i/o if they consistently need to read in new train data. See `train.Worker.ensure_split_config()` for more info.
 - Once "Manager Complete." is logged, proceed launch workers (if you haven't already).
 
 ### Running Workers
@@ -60,4 +65,3 @@ The object-oriented argument handling and results saving allows for easy additio
     - Manager could have a way of knowing it's status in adding arguments to the queue.
     - Workers could hold their lock until completion, only then deleting their model_config object from the arg queue.
 - Add soft-stop global signal to allow for pausing without losing 1 model arg per process
-
