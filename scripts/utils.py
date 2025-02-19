@@ -96,6 +96,8 @@ class DistributedArgHandler:
                         with open(file_path, 'rb') as f:
                             obj = pickle.load(f)
                         file_path.unlink()  # Remove the file after successful retrieval
+                        if os.path.exists(lock_path):
+                            os.remove(lock_path) # Clean lock file
                         return obj
             except:
                 continue  # If we fail to acquire the lock or read the file, try another
