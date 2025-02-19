@@ -69,6 +69,7 @@ class Worker:
             # Start a timer. If the function does not complete within 60 minutes, 
             # it will raise a TimeoutError skipping that hyperparameter configuration for all remaining batches.
             try:
+                signal.signal(signal.SIGALRM, handler)
                 signal.alarm(MAX_TRAIN_TIME) # Skip hyperparam config after MAX_TRAIN_TIME
                 self.train_eval_save(model_config)
                 # Disable the alarm
