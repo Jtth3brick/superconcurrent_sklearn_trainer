@@ -105,10 +105,10 @@ class Worker:
                 with open(model_file_path, "wb") as file:
                     pickle.dump(pipe, file)
             
-            # extract top features
-            if extract_features:
-                model_config.top_k_features = utils.extract_topK_features(pipe)
-                self.logger.info(f"Top features extracted: {list(model_config.top_k_features.keys())}")
+            # # extract top features
+            # if extract_features:
+            #     model_config.top_k_features = utils.extract_topK_features(pipe)
+            #     self.logger.info(f"Top features extracted: {list(model_config.top_k_features.keys())}")
 
             # Check if we want validate scores
             if X_val is not None:
