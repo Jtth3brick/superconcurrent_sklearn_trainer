@@ -162,25 +162,25 @@ class Worker:
             y_train_original = None
             gc.collect()
 
-        def ensure_split_config(self, model_config: utils.ModelConfig):
-            """
-            Checks if in-memory split config is correct for the given model config and swaps if not.
-            """
-            needed_split_name = model_config.split_name
-            cur_data_split_name = None
-            if self.split_config is not None:
-                cur_data_split_name = self.split_config.split_name
+    def ensure_split_config(self, model_config: utils.ModelConfig):
+        """
+        Checks if in-memory split config is correct for the given model config and swaps if not.
+        """
+        needed_split_name = model_config.split_name
+        cur_data_split_name = None
+        if self.split_config is not None:
+            cur_data_split_name = self.split_config.split_name
 
-            if model_config.split_name != cur_data_split_name:
-                self.logger.info(f"Switching in memory train data from {cur_data_split_name} to {needed_split_name}.")
-                
-                # Explicitly clear the old split_config to help garbage collection
-                self.split_config = None
-                gc.collect()
-                
-                split_config_path = get_split_args_path(needed_split_name)
-                with open(split_config_path, 'rb') as f:
-                    self.split_config = pickle.load(f)
+        if model_config.split_name != cur_data_split_name:
+            self.logger.info(f"Switching in memory train data from {cur_data_split_name} to {needed_split_name}.")
+            
+            # Explicitly clear the old split_config to help garbage collection
+            self.split_config = None
+            gc.collect()
+            
+            split_config_path = get_split_args_path(needed_split_name)
+            with open(split_config_path, 'rb') as f:
+                self.split_config = pickle.load(f)
 
     def get_model_config(self) -> utils.ModelConfig:
         """
