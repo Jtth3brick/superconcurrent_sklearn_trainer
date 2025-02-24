@@ -8,6 +8,7 @@ import yaml
 import signal
 import logging
 import traceback
+import gc
 import hashlib
 import random
 import pickle

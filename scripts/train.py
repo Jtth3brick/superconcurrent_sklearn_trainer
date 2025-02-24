@@ -66,86 +66,121 @@ class Worker:
             model_config = self.get_model_config()
             self.ensure_split_config(model_config)
 
-            # Start a timer. If the function does not complete within 60 minutes, 
-            # it will raise a TimeoutError skipping that hyperparameter configuration for all remaining batches.
             try:
                 signal.signal(signal.SIGALRM, handler)
-                signal.alarm(MAX_TRAIN_TIME) # Skip hyperparam config after MAX_TRAIN_TIME
+                signal.alarm(MAX_TRAIN_TIME)
                 self.train_eval_save(model_config)
-                # Disable the alarm
                 signal.alarm(0)
             except TimeoutError:
                 self.logger.error(f"TimeoutError: eval_assemble_save did not complete within 60 minutes for config={str(model_config)}")
-                continue
             except Exception as e:
                 self.logger.error(f"Error occurred in eval_assemble_save: {str(e)}\n\tconfig={str(model_config)}")
-    
+            finally:
+                # Explicitly clear model_config to help garbage collection
+                model_config = None
+                gc.collect()
+        
     def train_eval_save(self, model_config: utils.ModelConfig, extract_features=True, save_model=True) -> None:
         self.logger.info(f"Training model:\n\t{model_config}")
 
-        # Convert to clean names for model training
-        X_train, y_train = self.split_config.X_train.copy(), self.split_config.y_train.copy()
-        if self.split_config.X_val is not None:
-            X_val, y_val = self.split_config.X_val.copy(), self.split_config.y_val.copy()
-        else:
-            X_val, y_val = None, None
+        try:
+            # Convert to clean names for model training
+            X_train, y_train = self.split_config.X_train.copy(), self.split_config.y_train.copy()
+            if self.split_config.X_val is not None:
+                X_val, y_val = self.split_config.X_val.copy(), self.split_config.y_val.copy()
+            else:
+                X_val, y_val = None, None
 
-        # Check if we should do CV
-        if self.split_config.cv_indexes: 
-            model_config.cv_scores = self.get_cv_scores(model_config)
+            # Check if we should do CV
+            if self.split_config.cv_indexes: 
+                model_config.cv_scores = self.get_cv_scores(model_config)
 
-        # train full model
-        pipe = model_config.get_empty_pipe()
-        pipe.fit(X_train.copy(), y_train.copy())
+            # train full model
+            pipe = model_config.get_empty_pipe()
+            pipe.fit(X_train, y_train)
 
-        # save fitted pipe
-        if save_model:
-            model_file_path = MODELS_DIR / f"{model_config.config_hash}.model.pkl"
-            with open(model_file_path, "wb") as file:
-                pickle.dump(pipe, file)
-        
-        # extract top features
-        if extract_features:
-            model_config.top_k_features = utils.extract_topK_features(pipe)
-            self.logger.info(f"Top features extracted: {list(model_config.top_k_features.keys())}")
+            # save fitted pipe
+            if save_model:
+                model_file_path = MODELS_DIR / f"{model_config.config_hash}.model.pkl"
+                with open(model_file_path, "wb") as file:
+                    pickle.dump(pipe, file)
+            
+            # extract top features
+            if extract_features:
+                model_config.top_k_features = utils.extract_topK_features(pipe)
+                self.logger.info(f"Top features extracted: {list(model_config.top_k_features.keys())}")
 
-        # Check if we want validate scores
-        if self.split_config.X_val is not None:
-            y_pred_proba = pipe.predict_proba(self.split_config.X_val.copy())
-            model_config.validate_score = utils.get_score(y_true=self.split_config.y_val.copy(), y_pred_proba=y_pred_proba)
+            # Check if we want validate scores
+            if X_val is not None:
+                y_pred_proba = pipe.predict_proba(X_val)
+                model_config.validate_score = utils.get_score(y_true=y_val, y_pred_proba=y_pred_proba)
 
-        # Save scored utils.ModelConfig
-        self.save_queue.put(model_config, obj_name=model_config.config_hash, group_name=model_config.split_name)
+            # Save scored utils.ModelConfig
+            self.save_queue.put(model_config, obj_name=model_config.config_hash, group_name=model_config.split_name)
+        finally:
+            # Explicitly clear references to free memory
+            pipe = None
+            X_train = None
+            y_train = None
+            X_val = None
+            y_val = None
+            gc.collect()
     
     def get_cv_scores(self, model_config: utils.ModelConfig) -> List[float]:
         scores = []
-        for cv_train_indices, cv_test_indices in self.split_config.cv_indexes:
-            pipe = model_config.get_empty_pipe()
-            X_train, y_train = self.split_config.X_train.copy(), self.split_config.y_train.copy()
-            X_train_fold = X_train.loc[cv_train_indices]
-            y_train_fold = y_train.loc[cv_train_indices]
-            X_val_fold = X_train.loc[cv_test_indices] 
-            y_val_fold = y_train.loc[cv_test_indices]
-            pipe.fit(X_train_fold.copy(), y_train_fold.copy())
-            y_pred_proba = pipe.predict_proba(X_val_fold)
-            score = utils.get_score(y_true=y_val_fold, y_pred_proba=y_pred_proba, trained_classes=pipe.classes_)
-            scores.append(score)
-        return scores
+        X_train_original, y_train_original = self.split_config.X_train.copy(), self.split_config.y_train.copy()
+        
+        try:
+            for i, (cv_train_indices, cv_test_indices) in enumerate(self.split_config.cv_indexes):
+                pipe = model_config.get_empty_pipe()
+                
+                X_train_fold = X_train_original.loc[cv_train_indices]
+                y_train_fold = y_train_original.loc[cv_train_indices]
+                X_val_fold = X_train_original.loc[cv_test_indices] 
+                y_val_fold = y_train_original.loc[cv_test_indices]
+                
+                pipe.fit(X_train_fold, y_train_fold)
+                y_pred_proba = pipe.predict_proba(X_val_fold)
+                score = utils.get_score(y_true=y_val_fold, y_pred_proba=y_pred_proba, trained_classes=pipe.classes_)
+                scores.append(score)
+                
+                # Clear fold-specific objects
+                pipe = None
+                X_train_fold = None
+                y_train_fold = None
+                X_val_fold = None
+                y_val_fold = None
+                
+                # Run garbage collection periodically during CV
+                if i % 2 == 0:  # Every other fold
+                    gc.collect()
+                    
+            return scores
+        finally:
+            # Clean up original data copies
+            X_train_original = None
+            y_train_original = None
+            gc.collect()
 
-    def ensure_split_config(self, model_config: utils.ModelConfig):
-        """
-        Checks if in-memory split config is correct for the given model config and swaps if not.
-        """
-        needed_split_name = model_config.split_name
-        cur_data_split_name = None
-        if self.split_config is not None:
-            cur_data_split_name = self.split_config.split_name
+        def ensure_split_config(self, model_config: utils.ModelConfig):
+            """
+            Checks if in-memory split config is correct for the given model config and swaps if not.
+            """
+            needed_split_name = model_config.split_name
+            cur_data_split_name = None
+            if self.split_config is not None:
+                cur_data_split_name = self.split_config.split_name
 
-        if model_config.split_name != cur_data_split_name:
-            self.logger.info(f"Switching in memory train data from {cur_data_split_name} to {needed_split_name}.")
-            split_config_path = get_split_args_path(needed_split_name)
-            with open(split_config_path, 'rb') as f:
-                self.split_config = pickle.load(f)
+            if model_config.split_name != cur_data_split_name:
+                self.logger.info(f"Switching in memory train data from {cur_data_split_name} to {needed_split_name}.")
+                
+                # Explicitly clear the old split_config to help garbage collection
+                self.split_config = None
+                gc.collect()
+                
+                split_config_path = get_split_args_path(needed_split_name)
+                with open(split_config_path, 'rb') as f:
+                    self.split_config = pickle.load(f)
 
     def get_model_config(self) -> utils.ModelConfig:
         """
