@@ -100,10 +100,10 @@ class Worker:
             pipe.fit(X_train, y_train)
 
             # save fitted pipe
-            if save_model:
-                model_file_path = MODELS_DIR / f"{model_config.config_hash}.model.pkl"
-                with open(model_file_path, "wb") as file:
-                    pickle.dump(pipe, file)
+            # if save_model:
+            #     model_file_path = MODELS_DIR / f"{model_config.config_hash}.model.pkl"
+            #     with open(model_file_path, "wb") as file:
+            #         pickle.dump(pipe, file)
             
             # # extract top features
             # if extract_features:
