@@ -182,11 +182,11 @@ rf:
       hyperparams:
         alpha: [1, 4, 64]
         threshold: [0.00001, 0.001, 0.1]
-    - function: "sklearn.decomposition.TruncatedSVD"
-      args:
-        algorithm: "randomized"
-      hyperparams:
-        n_components: [5, 10, 100, 500]
+    # - function: "sklearn.decomposition.TruncatedSVD"
+    #   args:
+    #     algorithm: "randomized"
+    #   hyperparams:
+    #     n_components: [5, 10, 100, 500]
   - Model:
     - function: "sklearn.ensemble.RandomForestClassifier"
       args:
